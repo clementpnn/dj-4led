@@ -1,0 +1,33 @@
+[package]
+name = "led-visualizer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core
+tokio = { version = "1.35", features = ["full"] }
+anyhow = "1.0"
+
+# Audio
+cpal = "0.15"
+rustfft = "6.1"
+apodize = "1.0" # Window functions
+
+# Network
+tokio-tungstenite = "0.21"                         # WebSocket
+futures-util = "0.3"                               # WebSocket streams
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Performance
+rayon = "1.8"
+parking_lot = "0.12" # Better mutex
+
+# Math
+num-complex = "0.4"
+
+# Compression (for eHub protocol)
+flate2 = "1.0"
+
+# Configuration
+toml = "0.8"

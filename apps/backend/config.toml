@@ -1,0 +1,46 @@
+# Configuration pour des couleurs vives et saturées
+# DJ-4LED - Mode Vivid Colors
+
+[audio]
+# Paramètres de capture audio
+sample_rate = 48000
+buffer_size = 64    # Buffer petit pour plus de réactivité
+channels = 1
+device_name = ""
+gain = 1.5          # Gain élevé pour plus de réactivité
+noise_floor = 0.01  # Seuil de bruit bas pour capter plus de nuances
+
+[led]
+# Configuration des contrôleurs LED
+controllers = [
+    "192.168.1.45:6454",
+    "192.168.1.46:6454",
+    "192.168.1.47:6454",
+    "192.168.1.48:6454",
+]
+fps = 60 # FPS élevé pour plus de fluidité
+brightness = 1.0 # Luminosité maximale
+gamma_correction = 1.0 # Pas de correction gamma pour des couleurs vives
+color_temperature = 1.0 # Neutre
+
+[effects]
+# Paramètres des effets visuels pour maximum d'impact
+smoothing_factor = 0.5 # Moins de lissage pour plus de réactivité
+bass_boost = 2.5       # Boost important des basses
+mid_boost = 2.0        # Boost des médiums
+high_boost = 1.5       # Boost des aigus
+particle_limit = 2500  # Plus de particules
+wave_speed = 1.5       # Ondes plus rapides
+
+[performance]
+# Optimisations de performance
+thread_pool_size = 8     # Utiliser plus de threads
+frame_skip = false       # Ne pas sauter de frames
+adaptive_quality = false # Toujours la qualité maximale
+max_cpu_percent = 90.0   # Permettre plus d'utilisation CPU
+
+# Configuration optimisée pour :
+# - Couleurs vives et saturées
+# - Réactivité maximale au son
+# - Effets visuels impressionnants
+# - Utilisation lors de concerts/événements
