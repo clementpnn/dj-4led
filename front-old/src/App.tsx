@@ -90,7 +90,7 @@ export default function App() {
   const selectEffect = (id: number) => {
     setCurrentEffect(id);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "Effect", id }));
+      ws.send(JSON.stringify({ type: "effect", id }));
     }
   };
 

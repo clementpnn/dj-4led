@@ -159,10 +159,13 @@ impl Effect for CircularWave {
             let wave2 = ((dist * 10.0 - self.time * 4.0 * speed_mod).cos() + 1.0) / 2.0;
             let wave3 = ((dist * 5.0 - self.time * 2.0 * speed_mod).sin() + 1.0) / 2.0;
 
-            // Intensité plus réactive
-            let intensity =
-                (wave1 * bass_energy * 2.0 + wave2 * mid_energy * 1.5 + wave3 * high_energy)
-                    .min(1.0);
+            // Intensité de base même sans audio
+            let base_intensity = 0.3; // Intensité minimale pour voir l'effet
+            let audio_intensity =
+                wave1 * bass_energy * 2.0 + wave2 * mid_energy * 1.5 + wave3 * high_energy;
+
+            // Combiner intensité de base et audio
+            let intensity = (base_intensity + audio_intensity).min(1.0);
 
             // Couleur arc-en-ciel animée avec modulation audio
             let hue_shift = bass_energy * 0.2;
@@ -172,9 +175,12 @@ impl Effect for CircularWave {
 
             // Saturation élevée pour des couleurs vives
             let saturation = 0.9 + (bass_energy + mid_energy) * 0.1;
-            let brightness = intensity * 1.2; // Boost de luminosité
 
-            let (r, g, b) = hsv_to_rgb(hue % 1.0, saturation.min(1.0), brightness.min(1.0));
+            // Créer un pattern visible même sans audio
+            let wave_pattern = (wave1 * 0.4 + wave2 * 0.3 + wave3 * 0.3).min(1.0);
+            let brightness = (base_intensity + intensity * wave_pattern).min(1.0);
+
+            let (r, g, b) = hsv_to_rgb(hue % 1.0, saturation.min(1.0), brightness);
 
             pixel[0] = (r * 255.0) as u8;
             pixel[1] = (g * 255.0) as u8;
@@ -224,62 +230,73 @@ impl Effect for ParticleSystem {
             );
         }
 
-        // Ajouter des particules selon l'énergie
-        if total_energy > 0.05 && self.particles.len() < 2000 {
-            let num_particles = ((bass_energy * 50.0).min(20.0)
+        // Toujours ajouter quelques particules pour avoir un effet visible
+        let base_particles = if self.particles.len() < 100 { 2 } else { 0 };
+        let audio_particles = if total_energy > 0.05 && self.particles.len() < 2000 {
+            ((bass_energy * 50.0).min(20.0)
                 + (mid_energy * 30.0).min(10.0)
-                + (high_energy * 20.0).min(5.0)) as usize;
+                + (high_energy * 20.0).min(5.0)) as usize
+        } else {
+            0
+        };
 
-            for i in 0..num_particles {
-                // Position de spawn selon la fréquence
-                let (spawn_x, spawn_y) = if i % 3 == 0 && bass_energy > 0.1 {
-                    // Basses : depuis le bas
-                    (rand() * 128.0, 120.0 + rand() * 8.0)
-                } else if i % 3 == 1 && mid_energy > 0.1 {
-                    // Mediums : depuis les côtés
-                    if rand() > 0.5 {
-                        (0.0 + rand() * 8.0, 64.0 + (rand() - 0.5) * 64.0)
-                    } else {
-                        (120.0 + rand() * 8.0, 64.0 + (rand() - 0.5) * 64.0)
-                    }
+        let num_particles = base_particles + audio_particles;
+
+        for i in 0..num_particles {
+            // Position de spawn selon la fréquence ou aléatoire si pas d'audio
+            let (spawn_x, spawn_y) = if i < base_particles {
+                // Particules de base : spawn aléatoire
+                (rand() * 128.0, 100.0 + rand() * 28.0)
+            } else if i % 3 == 0 && bass_energy > 0.1 {
+                // Basses : depuis le bas
+                (rand() * 128.0, 120.0 + rand() * 8.0)
+            } else if i % 3 == 1 && mid_energy > 0.1 {
+                // Mediums : depuis les côtés
+                if rand() > 0.5 {
+                    (0.0 + rand() * 8.0, 64.0 + (rand() - 0.5) * 64.0)
                 } else {
-                    // Aigus : aléatoire
-                    (rand() * 128.0, rand() * 128.0)
-                };
+                    (120.0 + rand() * 8.0, 64.0 + (rand() - 0.5) * 64.0)
+                }
+            } else {
+                // Aigus ou par défaut : aléatoire
+                (rand() * 128.0, rand() * 128.0)
+            };
 
-                // Vitesse et couleur selon la fréquence
-                let (vx, vy, hue) = if i % 3 == 0 {
-                    // Basses : montée rapide, rouge/orange
-                    (
-                        (rand() - 0.5) * bass_energy * 10.0,
-                        -bass_energy * 15.0 - rand() * 5.0,
-                        rand() * 0.1,
-                    ) // Rouge
-                } else if i % 3 == 1 {
-                    // Mediums : mouvement horizontal, vert/bleu
-                    (
-                        (rand() - 0.5) * mid_energy * 15.0,
-                        (rand() - 0.5) * mid_energy * 10.0,
-                        0.3 + rand() * 0.3,
-                    ) // Vert-Bleu
-                } else {
-                    // Aigus : explosion, violet/rose
-                    (
-                        (rand() - 0.5) * high_energy * 20.0,
-                        (rand() - 0.5) * high_energy * 20.0,
-                        0.7 + rand() * 0.3,
-                    ) // Violet
-                };
+            // Vitesse et couleur selon la fréquence ou par défaut
+            let (vx, vy, hue) = if i < base_particles {
+                // Particules de base : mouvement lent coloré
+                ((rand() - 0.5) * 5.0, -rand() * 8.0 - 2.0, rand())
+            } else if i % 3 == 0 {
+                // Basses : montée rapide, rouge/orange
+                (
+                    (rand() - 0.5) * bass_energy * 10.0,
+                    -bass_energy * 15.0 - rand() * 5.0,
+                    rand() * 0.1,
+                ) // Rouge
+            } else if i % 3 == 1 {
+                // Mediums : mouvement horizontal, vert/bleu
+                (
+                    (rand() - 0.5) * mid_energy * 15.0,
+                    (rand() - 0.5) * mid_energy * 10.0,
+                    0.3 + rand() * 0.3,
+                ) // Vert-Bleu
+            } else {
+                // Aigus : explosion, violet/rose
+                (
+                    (rand() - 0.5) * high_energy * 20.0,
+                    (rand() - 0.5) * high_energy * 20.0,
+                    0.7 + rand() * 0.3,
+                ) // Violet
+            };
 
-                self.particles.push(Particle {
-                    x: spawn_x,
-                    y: spawn_y,
-                    vx,
-                    vy,
-                    life: 0.5 + total_energy * 0.5, // Vie plus longue si fort
-                    color: hsv_to_rgb(hue, 1.0, 1.0), // Saturation et luminosité maximales
-                });
-            }
+            self.particles.push(Particle {
+                x: spawn_x,
+                y: spawn_y,
+                vx,
+                vy,
+                life: 0.5 + total_energy * 0.5, // Vie plus longue si fort
+                color: hsv_to_rgb(hue, 1.0, 1.0), // Saturation et luminosité maximales
+            });
         }
 
         // Mise à jour des particules avec physique améliorée

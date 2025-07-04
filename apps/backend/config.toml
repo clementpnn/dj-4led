@@ -1,14 +1,15 @@
 # Configuration pour des couleurs vives et saturées
 # DJ-4LED - Mode Vivid Colors
+# Optimisé pour des performances visuelles maximales
 
 [audio]
-# Paramètres de capture audio
+# Paramètres de capture audio ultra-réactifs
 sample_rate = 48000
-buffer_size = 64    # Buffer petit pour plus de réactivité
+buffer_size = 32    # Buffer très petit pour réactivité maximale
 channels = 1
-device_name = ""
-gain = 1.5          # Gain élevé pour plus de réactivité
-noise_floor = 0.01  # Seuil de bruit bas pour capter plus de nuances
+device_name = ""    # Auto-détection
+gain = 2.0          # Gain élevé pour capturer tous les détails
+noise_floor = 0.005 # Seuil très bas pour plus de nuances
 
 [led]
 # Configuration des contrôleurs LED
@@ -18,29 +19,55 @@ controllers = [
     "192.168.1.47:6454",
     "192.168.1.48:6454",
 ]
-fps = 60 # FPS élevé pour plus de fluidité
+fps = 60 # FPS maximum pour fluidité
 brightness = 1.0 # Luminosité maximale
-gamma_correction = 1.0 # Pas de correction gamma pour des couleurs vives
-color_temperature = 1.0 # Neutre
+gamma_correction = 1.0 # Pas de correction gamma - couleurs pures
+color_temperature = 1.0 # Température neutre
 
 [effects]
-# Paramètres des effets visuels pour maximum d'impact
-smoothing_factor = 0.5 # Moins de lissage pour plus de réactivité
-bass_boost = 2.5       # Boost important des basses
-mid_boost = 2.0        # Boost des médiums
-high_boost = 1.5       # Boost des aigus
-particle_limit = 2500  # Plus de particules
-wave_speed = 1.5       # Ondes plus rapides
+# Paramètres des effets visuels pour impact maximum
+smoothing_factor = 0.3 # Peu de lissage pour réactivité
+bass_boost = 3.0       # Boost très important des basses
+mid_boost = 2.2        # Boost fort des médiums
+high_boost = 1.8       # Boost des aigus
+particle_limit = 3000  # Maximum de particules
+wave_speed = 2.0       # Ondes très rapides
+
+# Paramètres couleurs vives
+color_saturation = 1.5 # Saturation augmentée
+color_intensity = 1.2  # Intensité des couleurs
+hue_shift_speed = 0.8  # Vitesse de rotation des couleurs
+contrast_boost = 1.3   # Contraste augmenté
 
 [performance]
-# Optimisations de performance
-thread_pool_size = 8     # Utiliser plus de threads
-frame_skip = false       # Ne pas sauter de frames
+# Optimisations pour performance maximale
+thread_pool_size = 12    # Utiliser tous les threads disponibles
+frame_skip = false       # Jamais de skip de frames
 adaptive_quality = false # Toujours la qualité maximale
-max_cpu_percent = 90.0   # Permettre plus d'utilisation CPU
+max_cpu_percent = 95.0   # Utilisation CPU maximale
+priority = "high"        # Priorité haute pour le processus
 
-# Configuration optimisée pour :
-# - Couleurs vives et saturées
+# Configuration spécifique mode vivid
+[vivid]
+# Boost des couleurs primaires
+red_boost = 1.4
+green_boost = 1.3
+blue_boost = 1.5
+
+# Effets spéciaux
+strobe_enabled = true
+strobe_threshold = 0.8 # Seuil pour déclenchement strobe
+flash_intensity = 1.0  # Intensité des flashs
+rainbow_mode = true    # Mode arc-en-ciel actif
+
+# Réactivité audio
+beat_detection = true
+tempo_sync = true
+frequency_split = 8   # Nombre de bandes de fréquences
+
+# Profil optimisé pour :
+# - Événements musicaux
+# - Couleurs éclatantes et saturées
 # - Réactivité maximale au son
 # - Effets visuels impressionnants
-# - Utilisation lors de concerts/événements
+# - Performance sans compromis
