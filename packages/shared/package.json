@@ -1,0 +1,10 @@
+{
+  "name": "@monorepo/shared",
+  "version": "0.0.1",
+  "private": true,
+  
+  "devDependencies": {
+    "@biomejs/biome": "1.5.3",
+    "typescript": "^5.3.0"
+  }
+}

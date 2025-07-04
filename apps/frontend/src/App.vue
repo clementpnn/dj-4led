@@ -1,7 +1,6 @@
 <script setup lang="ts">
-
-import { MyButton } from '@monorepo/ui';
-import HelloWorld from '@/components/HelloWorld.vue';
+import HelloWorld from '@/components/HelloWorld.vue'
+import { MyButton } from '@monorepo/ui'
 </script>
 
 <template>
