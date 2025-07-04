@@ -10,7 +10,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 #[serde(tag = "type", rename_all = "lowercase")]
 enum WsMessage {
     Effect { id: usize },
-    Param { name: String, value: f32 },
+    Param { name: String, value: String },
     Frame { data: Vec<u8> },
     Spectrum { data: Vec<f32> },
 }
@@ -106,21 +106,45 @@ async fn handle_connection(stream: TcpStream, state: Arc<AppState>) -> Result<()
             if let Message::Text(text) = msg {
                 println!("📨 Received WebSocket message: {}", text);
                 match serde_json::from_str::<WsMessage>(&text) {
-                    Ok(cmd) => {
-                        match cmd {
-                            WsMessage::Effect { id } => {
-                                println!("🎨 Changing effect to: {}", id);
-                                state.effect_engine.lock().set_effect(id);
-                            }
-                            WsMessage::Param { name, value } => {
-                                println!("🎛️  Parameter change: {} = {}", name, value);
-                                // TODO: Implémenter les paramètres
-                            }
-                            _ => {
-                                println!("⚠️  Unexpected message type");
+                    Ok(cmd) => match cmd {
+                        WsMessage::Effect { id } => {
+                            println!("🎨 Changing effect to: {}", id);
+                            state.effect_engine.lock().set_effect(id);
+                        }
+                        WsMessage::Param { name, value } => {
+                            println!("🎛️  Parameter change: {} = {}", name, value);
+
+                            match name.as_str() {
+                                "colorMode" => {
+                                    println!("🎨 Setting color mode to: {}", value);
+                                    state.effect_engine.lock().set_color_mode(&value);
+                                }
+                                "customColor" => {
+                                    println!("🎨 Setting custom color: {}", value);
+                                    let parts: Vec<f32> =
+                                        value.split(',').filter_map(|s| s.parse().ok()).collect();
+                                    if parts.len() == 3 {
+                                        println!(
+                                            "   RGB values: R={:.2}, G={:.2}, B={:.2}",
+                                            parts[0], parts[1], parts[2]
+                                        );
+                                        state
+                                            .effect_engine
+                                            .lock()
+                                            .set_custom_color(parts[0], parts[1], parts[2]);
+                                    } else {
+                                        println!("❌ Invalid color format. Expected R,G,B but got {} parts", parts.len());
+                                    }
+                                }
+                                _ => {
+                                    println!("⚠️  Unknown parameter: {}", name);
+                                }
                             }
                         }
-                    }
+                        _ => {
+                            println!("⚠️  Unexpected message type");
+                        }
+                    },
                     Err(e) => {
                         println!("❌ Failed to parse WebSocket message: {}", e);
                         println!("   Raw message: {}", text);

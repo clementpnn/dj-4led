@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::runtime::Runtime;
 
 mod audio;
+
 mod effects;
 mod ehub;
 mod fft;
@@ -11,6 +12,7 @@ mod led;
 mod websocket;
 
 use audio::AudioCapture;
+
 use effects::EffectEngine;
 use led::{LedController, LedMode};
 use std::env;
@@ -38,6 +40,7 @@ fn main() -> Result<()> {
     }
 
     // État partagé entre threads
+
     let state = Arc::new(AppState {
         spectrum: Mutex::new(vec![0.0; 64]),
         effect_engine: Mutex::new(EffectEngine::new()),

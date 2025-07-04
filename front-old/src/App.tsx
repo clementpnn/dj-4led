@@ -6,6 +6,12 @@ type Effect = {
   icon: string;
 };
 
+type ColorMode = {
+  id: string;
+  name: string;
+  icon: string;
+};
+
 type FrameMessage = {
   type: "frame";
   data: number[];
@@ -22,6 +28,8 @@ export default function App() {
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [currentEffect, setCurrentEffect] = useState<number>(0);
+  const [currentColorMode, setCurrentColorMode] = useState<string>("rainbow");
+  const [customColor, setCustomColor] = useState<string>("#ff0080");
   const [spectrum, setSpectrum] = useState<number[]>(new Array(64).fill(0));
   const [frameData, setFrameData] = useState<number[] | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -30,6 +38,14 @@ export default function App() {
     { id: 0, name: "Spectrum Bars", icon: "📊" },
     { id: 1, name: "Circular Wave", icon: "🌊" },
     { id: 2, name: "Particles", icon: "✨" },
+  ];
+
+  const colorModes: ColorMode[] = [
+    { id: "rainbow", name: "Rainbow", icon: "🌈" },
+    { id: "fire", name: "Fire", icon: "🔥" },
+    { id: "ocean", name: "Ocean", icon: "🌊" },
+    { id: "sunset", name: "Sunset", icon: "🌅" },
+    { id: "custom", name: "Custom", icon: "🎨" },
   ];
 
   useEffect(() => {
@@ -91,6 +107,41 @@ export default function App() {
     setCurrentEffect(id);
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "effect", id }));
+    }
+  };
+
+  const selectColorMode = (mode: string) => {
+    setCurrentColorMode(mode);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: "param",
+          name: "colorMode",
+          value: mode,
+        }),
+      );
+    }
+  };
+
+  const updateCustomColor = (color: string) => {
+    setCustomColor(color);
+    if (
+      ws &&
+      ws.readyState === WebSocket.OPEN &&
+      currentColorMode === "custom"
+    ) {
+      // Convert hex to RGB values
+      const r = parseInt(color.slice(1, 3), 16) / 255;
+      const g = parseInt(color.slice(3, 5), 16) / 255;
+      const b = parseInt(color.slice(5, 7), 16) / 255;
+
+      ws.send(
+        JSON.stringify({
+          type: "param",
+          name: "customColor",
+          value: `${r},${g},${b}`,
+        }),
+      );
     }
   };
 
@@ -198,6 +249,74 @@ export default function App() {
               </button>
             ))}
           </div>
+
+          <h3 style={{ marginBottom: "10px" }}>🎨 Color Mode</h3>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, 1fr)",
+              gap: "10px",
+              marginBottom: "20px",
+            }}
+          >
+            {colorModes.map((mode) => (
+              <button
+                key={mode.id}
+                onClick={() => selectColorMode(mode.id)}
+                style={{
+                  padding: "12px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background:
+                    currentColorMode === mode.id
+                      ? "rgba(255,255,255,0.3)"
+                      : "rgba(255,255,255,0.1)",
+                  color: "white",
+                  fontSize: "14px",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                  textAlign: "left",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span style={{ fontSize: "20px" }}>{mode.icon}</span>
+                {mode.name}
+              </button>
+            ))}
+          </div>
+
+          {currentColorMode === "custom" && (
+            <div
+              style={{
+                marginBottom: "20px",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                background: "rgba(255,255,255,0.1)",
+                padding: "10px",
+                borderRadius: "8px",
+              }}
+            >
+              <label style={{ fontWeight: "bold" }}>Custom Color:</label>
+              <input
+                type="color"
+                value={customColor}
+                onChange={(e) => updateCustomColor(e.target.value)}
+                style={{
+                  width: "60px",
+                  height: "40px",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                }}
+              />
+              <span style={{ fontSize: "12px", opacity: 0.8 }}>
+                {customColor}
+              </span>
+            </div>
+          )}
 
           <h3>📊 Audio Spectrum</h3>
           <div
