@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import HelloWorld from '@/components/HelloWorld.vue'
-import { MyButton } from '@monorepo/ui'
+import HelloWorld from "@/components/HelloWorld.vue";
+import { MyButton } from "@monorepo/ui";
 </script>
 
 <template>
@@ -14,7 +14,6 @@ import { MyButton } from '@monorepo/ui'
   </div>
   <HelloWorld msg="Vite + Vue" />
   <MyButton>Test</MyButton>
-  
 </template>
 
 <style scoped>

@@ -9,6 +9,7 @@
     "baseUrl": ".",
     "paths": {
       "@ui": ["../../packages/ui"],
+      "@monorepo/ui": ["../../packages/ui"],
       "@/*": ["src/*"]
     }
   }

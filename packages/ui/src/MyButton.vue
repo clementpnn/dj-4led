@@ -3,5 +3,7 @@
 </script>
 
 <template>
-    <button class="btn"><slot /></button>
+    <button class="btn" @click="onClick">
+        <slot />
+    </button>
 </template>
