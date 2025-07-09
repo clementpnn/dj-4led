@@ -419,9 +419,9 @@ impl ParticleSystem {
         &self,
         particle_index: usize,
         base_particles: usize,
-        bass_energy: f32,
-        mid_energy: f32,
-        high_energy: f32,
+        _bass_energy: f32,
+        _mid_energy: f32,
+        _high_energy: f32,
     ) -> (f32, f32, f32) {
         let color_mode = unsafe { &GLOBAL_COLOR_CONFIG };
         match color_mode.mode.as_str() {
