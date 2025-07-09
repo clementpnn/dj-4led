@@ -67,7 +67,26 @@ impl AudioCapture {
                     last_log_time = std::time::Instant::now();
                 }
 
-                callback(data);
+                // Filtrer le bruit - ne passer les données que si le niveau est significatif
+                if avg_level > 0.001 || max_level > 0.005 {
+                    // Appliquer un gate de bruit simple
+                    let filtered_data: Vec<f32> = data
+                        .iter()
+                        .map(|&x| {
+                            let abs_x = x.abs();
+                            if abs_x < 0.002 {
+                                0.0 // Supprimer le bruit de fond
+                            } else {
+                                x
+                            }
+                        })
+                        .collect();
+                    callback(&filtered_data);
+                } else {
+                    // En silence, envoyer des zéros
+                    let silence = vec![0.0; data.len()];
+                    callback(&silence);
+                }
             },
             |err| eprintln!("❌ Audio stream error: {}", err),
             None,
