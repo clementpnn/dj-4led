@@ -115,12 +115,16 @@ impl EffectEngine {
 // Effet 1: Barres de spectre
 pub struct SpectrumBars {
     smoothed: Vec<f32>,
+    peak_hold: Vec<f32>,
+    peak_decay: Vec<f32>,
 }
 
 impl SpectrumBars {
     pub fn new() -> Self {
         Self {
             smoothed: vec![0.0; 64],
+            peak_hold: vec![0.0; 64],
+            peak_decay: vec![0.0; 64],
         }
     }
 
@@ -174,18 +178,42 @@ impl SpectrumBars {
 
 impl Effect for SpectrumBars {
     fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
-        // Lissage plus réactif
+        // Lissage adaptatif : plus réactif pour les montées, plus lent pour les descentes
         for i in 0..64 {
-            self.smoothed[i] = self.smoothed[i] * 0.3 + spectrum[i] * 0.7;
+            let target = spectrum[i];
+            let current = self.smoothed[i];
+
+            if target > current {
+                // Montée rapide
+                self.smoothed[i] = current * 0.4 + target * 0.6;
+            } else {
+                // Descente lente pour un effet plus fluide
+                self.smoothed[i] = current * 0.85 + target * 0.15;
+            }
+
+            // Gestion des peaks avec décroissance
+            if self.smoothed[i] > self.peak_hold[i] {
+                self.peak_hold[i] = self.smoothed[i];
+                self.peak_decay[i] = 0.0;
+            } else {
+                self.peak_decay[i] += 0.02;
+                self.peak_hold[i] = (self.peak_hold[i] - self.peak_decay[i]).max(0.0);
+            }
         }
 
-        // Log de débogage pour vérifier l'audio
-        let max_level = self.smoothed.iter().cloned().fold(0.0f32, f32::max);
-        if max_level > 0.01 {
-            println!(
-                "🎵 [SpectrumBars] Audio level: {:.2}, spectrum[0]: {:.2}",
-                max_level, self.smoothed[0]
-            );
+        // Log de débogage moins fréquent
+        static mut DEBUG_COUNTER: u32 = 0;
+        unsafe {
+            DEBUG_COUNTER += 1;
+            if DEBUG_COUNTER % 50 == 0 {
+                let max_level = self.smoothed.iter().cloned().fold(0.0f32, f32::max);
+                if max_level > 0.01 {
+                    println!(
+                        "🎵 [SpectrumBars] Audio level: {:.2}, spectrum[0]: {:.2}",
+                        max_level, self.smoothed[0]
+                    );
+                }
+            }
         }
 
         // Log de débogage pour vérifier le mode de couleur
@@ -211,23 +239,73 @@ impl Effect for SpectrumBars {
             let x = (i % 128) as f32;
             let y = (i / 128) as f32;
 
-            // Calculer la barre correspondante (2 pixels de large)
-            let bar = (x / 2.0) as usize;
-            if bar < 64 {
-                // Hauteur plus réactive avec boost des basses
-                let boost = if bar < 8 {
-                    1.5
-                } else if bar < 16 {
-                    1.2
+            // Effet miroir : afficher le spectre deux fois (32 barres + 32 barres en miroir)
+            let bar = if x < 64.0 {
+                // Partie gauche : barres 0-31
+                (x * 32.0 / 64.0) as usize
+            } else {
+                // Partie droite : barres 31-0 (miroir)
+                (31.0 - (x - 64.0) * 32.0 / 64.0) as usize
+            };
+
+            if bar < 32 {
+                // Hauteur avec courbe exponentielle pour un meilleur rendu
+                // Utiliser les 32 premières barres du spectre pour les deux côtés
+                let value = self.smoothed[bar.min(31)];
+                // Appliquer une courbe pour rendre les barres plus dynamiques
+                let curved_value = if value > 0.0 {
+                    value.powf(0.6) // Rend les valeurs moyennes plus visibles
                 } else {
-                    1.0
+                    0.0
                 };
-                let height = (self.smoothed[bar] * boost).min(1.0) * 128.0;
 
-                if y > 128.0 - height {
-                    let brightness = 1.0 - (y - (128.0 - height)) / height;
+                let height = curved_value * 120.0; // Légèrement moins que 128 pour éviter saturation
+                let peak_height = self.peak_hold[bar] * 120.0;
+
+                // Gradient vertical pour chaque barre
+                let bar_bottom = 128.0 - height;
+                let distance_from_bottom = (y - bar_bottom).max(0.0);
+                let gradient_factor = if y >= bar_bottom && y < 128.0 {
+                    1.0 - (distance_from_bottom / height).min(1.0) * 0.3
+                } else {
+                    0.0
+                };
+
+                // Dessiner la barre principale avec gradient
+                if y >= bar_bottom && y < 128.0 {
+                    let brightness = gradient_factor;
                     let (r, g, b) = self.get_color_for_bar(bar, brightness);
+                    pixel[0] = (r * 255.0) as u8;
+                    pixel[1] = (g * 255.0) as u8;
+                    pixel[2] = (b * 255.0) as u8;
+                }
 
+                // Dessiner le peak (ligne fine en haut)
+                let peak_y = 128.0 - peak_height;
+                if (y - peak_y).abs() < 1.0 && peak_height > 5.0 {
+                    let (r, g, b) = self.get_color_for_bar(bar, 0.8);
+                    pixel[0] = (r * 255.0 * 0.8) as u8;
+                    pixel[1] = (g * 255.0 * 0.8) as u8;
+                    pixel[2] = (b * 255.0 * 0.8) as u8;
+                }
+
+                // Ajouter une ligne de séparation subtile entre les barres
+                let bar_pos = if x < 64.0 {
+                    x * 32.0 / 64.0
+                } else {
+                    31.0 - (x - 64.0) * 32.0 / 64.0
+                };
+                let bar_boundary = (bar_pos - bar as f32).abs() * 64.0 / 32.0;
+                if bar_boundary > 1.8 && y >= bar_bottom && y < 128.0 {
+                    // Atténuer légèrement les bords pour créer une séparation visuelle
+                    pixel[0] = (pixel[0] as f32 * 0.7) as u8;
+                    pixel[1] = (pixel[1] as f32 * 0.7) as u8;
+                    pixel[2] = (pixel[2] as f32 * 0.7) as u8;
+                }
+
+                // Ajouter une ligne centrale brillante pour séparer les deux moitiés
+                if (x - 64.0).abs() < 0.5 && y >= bar_bottom && y < 128.0 {
+                    let (r, g, b) = self.get_color_for_bar(bar, 0.3);
                     pixel[0] = (r * 255.0) as u8;
                     pixel[1] = (g * 255.0) as u8;
                     pixel[2] = (b * 255.0) as u8;
