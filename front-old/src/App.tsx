@@ -1,28 +1,166 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import "./App.css";
 
-type Effect = {
+interface Effect {
   id: number;
   name: string;
   icon: string;
-};
+}
 
-type ColorMode = {
+interface ColorMode {
   id: string;
   name: string;
   icon: string;
-};
+}
 
-type FrameMessage = {
+interface FrameMessage {
   type: "frame";
   data: number[];
-};
+}
 
-type SpectrumMessage = {
+interface CompressedFrameMessage {
+  type: "compressedframe";
+  data: number[];
+  width: number;
+  height: number;
+}
+
+interface SpectrumMessage {
   type: "spectrum";
   data: number[];
-};
+}
 
-type WebSocketMessage = FrameMessage | SpectrumMessage;
+type WebSocketMessage = FrameMessage | CompressedFrameMessage | SpectrumMessage;
+
+// Décompresseur pour les frames compressées
+class FrameDecompressor {
+  async decompress(data: Uint8Array): Promise<Uint8Array> {
+    try {
+      // Utiliser l'API Compression Streams si disponible
+      if ("DecompressionStream" in (window as any)) {
+        const ds = new (window as any).DecompressionStream("gzip");
+        const writer = ds.writable.getWriter();
+        const reader = ds.readable.getReader();
+
+        writer.write(data);
+        writer.close();
+
+        const chunks: Uint8Array[] = [];
+        let result: any;
+        while (!(result = await reader.read()).done) {
+          chunks.push(result.value);
+        }
+
+        // Combiner tous les chunks
+        const totalLength = chunks.reduce(
+          (acc, chunk) => acc + chunk.length,
+          0,
+        );
+        const combined = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) {
+          combined.set(chunk, offset);
+          offset += chunk.length;
+        }
+
+        return combined;
+      }
+    } catch (error) {
+      console.error("Decompression failed:", error);
+    }
+
+    // Fallback: retourner les données telles quelles
+    return data;
+  }
+}
+
+// Optimisation du rendu avec requestAnimationFrame
+class FrameRenderer {
+  private canvas: HTMLCanvasElement | null = null;
+  private ctx: CanvasRenderingContext2D | null = null;
+  private imageData: ImageData | null = null;
+  private pendingFrame: Uint8ClampedArray | null = null;
+  private animationFrameId: number | null = null;
+  private lastRenderTime: number = 0;
+  private frameCount: number = 0;
+  private fpsCallback?: (fps: number) => void;
+
+  setCanvas(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d", { alpha: false });
+    if (this.ctx) {
+      this.ctx.imageSmoothingEnabled = false;
+      this.imageData = this.ctx.createImageData(64, 64);
+    }
+  }
+
+  setFpsCallback(callback: (fps: number) => void) {
+    this.fpsCallback = callback;
+  }
+
+  renderFrame(
+    data: number[] | Uint8Array,
+    width: number = 64,
+    height: number = 64,
+  ) {
+    if (!this.ctx || !this.imageData || !this.canvas) return;
+
+    // Convertir en Uint8ClampedArray si nécessaire
+    const frameData =
+      data instanceof Uint8ClampedArray ? data : new Uint8ClampedArray(data);
+
+    // Préparer les données RGBA
+    const rgbaData = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+      rgbaData[i * 4] = frameData[i * 3]; // R
+      rgbaData[i * 4 + 1] = frameData[i * 3 + 1]; // G
+      rgbaData[i * 4 + 2] = frameData[i * 3 + 2]; // B
+      rgbaData[i * 4 + 3] = 255; // A
+    }
+
+    this.pendingFrame = rgbaData;
+
+    // Utiliser requestAnimationFrame pour un rendu fluide
+    if (!this.animationFrameId) {
+      this.animationFrameId = requestAnimationFrame(() => this.render());
+    }
+  }
+
+  private render() {
+    if (!this.pendingFrame || !this.ctx || !this.imageData) {
+      this.animationFrameId = null;
+      return;
+    }
+
+    // Mettre à jour l'ImageData
+    this.imageData.data.set(this.pendingFrame);
+    this.ctx.putImageData(this.imageData, 0, 0);
+
+    // Calculer le FPS
+    const now = performance.now();
+    if (this.lastRenderTime > 0) {
+      this.frameCount++;
+      const elapsed = now - this.lastRenderTime;
+      if (elapsed >= 1000) {
+        const fps = Math.round((this.frameCount * 1000) / elapsed);
+        this.fpsCallback?.(fps);
+        this.frameCount = 0;
+        this.lastRenderTime = now;
+      }
+    } else {
+      this.lastRenderTime = now;
+    }
+
+    this.pendingFrame = null;
+    this.animationFrameId = null;
+  }
+
+  destroy() {
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+    }
+  }
+}
 
 export default function App() {
   const [ws, setWs] = useState<WebSocket | null>(null);
@@ -31,320 +169,288 @@ export default function App() {
   const [currentColorMode, setCurrentColorMode] = useState<string>("rainbow");
   const [customColor, setCustomColor] = useState<string>("#ff0080");
   const [spectrum, setSpectrum] = useState<number[]>(new Array(64).fill(0));
-  const [frameData, setFrameData] = useState<number[] | null>(null);
+  const [fps, setFps] = useState<number>(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const frameRendererRef = useRef<FrameRenderer | null>(null);
+  const decompressorRef = useRef<FrameDecompressor | null>(null);
 
   const effects: Effect[] = [
-    { id: 0, name: "Spectrum Bars", icon: "📊" },
-    { id: 1, name: "Circular Wave", icon: "🌊" },
-    { id: 2, name: "Particles", icon: "✨" },
+    { id: 0, name: "Plasma", icon: "🌊" },
+    { id: 1, name: "Fire", icon: "🔥" },
+    { id: 2, name: "Matrix", icon: "💊" },
+    { id: 3, name: "Spectrum", icon: "📊" },
+    { id: 4, name: "Starfield", icon: "⭐" },
+    { id: 5, name: "Ripple", icon: "💧" },
+    { id: 6, name: "Life", icon: "🧬" },
+    { id: 7, name: "Mandelbrot", icon: "🌀" },
+    { id: 8, name: "Lava", icon: "🌋" },
   ];
 
   const colorModes: ColorMode[] = [
     { id: "rainbow", name: "Rainbow", icon: "🌈" },
-    { id: "fire", name: "Fire", icon: "🔥" },
     { id: "ocean", name: "Ocean", icon: "🌊" },
-    { id: "sunset", name: "Sunset", icon: "🌅" },
+    { id: "fire", name: "Fire", icon: "🔥" },
+    { id: "matrix", name: "Matrix", icon: "💚" },
     { id: "custom", name: "Custom", icon: "🎨" },
   ];
 
+  // Initialiser les composants optimisés
   useEffect(() => {
-    const websocket = new WebSocket("ws://localhost:8080");
+    frameRendererRef.current = new FrameRenderer();
+    frameRendererRef.current.setFpsCallback(setFps);
+    decompressorRef.current = new FrameDecompressor();
 
-    websocket.onopen = () => {
-      console.log("Connected to visualizer");
-      setConnected(true);
+    return () => {
+      frameRendererRef.current?.destroy();
     };
-
-    websocket.onmessage = (event: MessageEvent) => {
-      const data: WebSocketMessage = JSON.parse(event.data);
-
-      switch (data.type) {
-        case "frame":
-          setFrameData(data.data);
-          break;
-        case "spectrum":
-          setSpectrum(data.data);
-          break;
-      }
-    };
-
-    websocket.onclose = () => {
-      setConnected(false);
-    };
-
-    setWs(websocket);
-
-    return () => websocket.close();
   }, []);
 
-  const drawFrame = () => {
-    const canvas = canvasRef.current;
-    if (!canvas || !frameData) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const imageData = ctx.createImageData(64, 64);
-
-    for (let i = 0; i < frameData.length; i += 3) {
-      const pixelIndex = (i / 3) * 4;
-      imageData.data[pixelIndex] = frameData[i];
-      imageData.data[pixelIndex + 1] = frameData[i + 1];
-      imageData.data[pixelIndex + 2] = frameData[i + 2];
-      imageData.data[pixelIndex + 3] = 255;
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-  };
-
-  // Auto-refresh canvas when frame data changes
+  // Configurer le canvas
   useEffect(() => {
-    drawFrame();
-  }, [frameData]);
-
-  const selectEffect = (id: number) => {
-    setCurrentEffect(id);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "effect", id }));
+    if (canvasRef.current && frameRendererRef.current) {
+      frameRendererRef.current.setCanvas(canvasRef.current);
     }
-  };
+  }, [canvasRef.current]);
 
-  const selectColorMode = (mode: string) => {
-    setCurrentColorMode(mode);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: "param",
-          name: "colorMode",
-          value: mode,
-        }),
-      );
-    }
-  };
+  // Connexion WebSocket optimisée
+  useEffect(() => {
+    let reconnectTimeout: NodeJS.Timeout;
+    let pingInterval: NodeJS.Timeout;
+    let currentWs: WebSocket | null = null;
 
-  const updateCustomColor = (color: string) => {
-    setCustomColor(color);
-    if (
-      ws &&
-      ws.readyState === WebSocket.OPEN &&
-      currentColorMode === "custom"
-    ) {
-      // Convert hex to RGB values
-      const r = parseInt(color.slice(1, 3), 16) / 255;
-      const g = parseInt(color.slice(3, 5), 16) / 255;
-      const b = parseInt(color.slice(5, 7), 16) / 255;
+    const connect = () => {
+      const websocket = new WebSocket("ws://localhost:8080");
+      currentWs = websocket;
+      websocket.binaryType = "arraybuffer";
 
-      ws.send(
-        JSON.stringify({
-          type: "param",
-          name: "customColor",
-          value: `${r},${g},${b}`,
-        }),
-      );
-    }
-  };
+      websocket.onopen = () => {
+        console.log("Connected to visualizer");
+        setConnected(true);
+
+        // Ping pour maintenir la connexion
+        pingInterval = setInterval(() => {
+          if (websocket.readyState === WebSocket.OPEN) {
+            websocket.send(JSON.stringify({ type: "ping" }));
+          }
+        }, 30000);
+      };
+
+      websocket.onmessage = async (event: MessageEvent) => {
+        try {
+          const data: WebSocketMessage = JSON.parse(event.data);
+
+          switch (data.type) {
+            case "frame":
+              frameRendererRef.current?.renderFrame(data.data);
+              break;
+
+            case "compressedframe":
+              if (decompressorRef.current) {
+                const compressed = new Uint8Array(data.data);
+                const decompressed =
+                  await decompressorRef.current.decompress(compressed);
+                frameRendererRef.current?.renderFrame(
+                  decompressed,
+                  data.width,
+                  data.height,
+                );
+              }
+              break;
+
+            case "spectrum":
+              // Limiter les mises à jour du spectre pour éviter trop de re-renders
+              setSpectrum((prevSpectrum) => {
+                // Mise à jour seulement si significativement différent
+                const isDifferent = data.data.some(
+                  (v, i) => Math.abs(v - prevSpectrum[i]) > 0.05,
+                );
+                return isDifferent ? data.data : prevSpectrum;
+              });
+              break;
+          }
+        } catch (error) {
+          console.error("Error processing message:", error);
+        }
+      };
+
+      websocket.onerror = (error) => {
+        console.error("WebSocket error:", error);
+      };
+
+      websocket.onclose = () => {
+        setConnected(false);
+        clearInterval(pingInterval);
+
+        // Reconnexion automatique après 2 secondes
+        reconnectTimeout = setTimeout(connect, 2000);
+      };
+
+      setWs(websocket);
+    };
+
+    connect();
+
+    return () => {
+      clearTimeout(reconnectTimeout);
+      clearInterval(pingInterval);
+      currentWs?.close();
+    };
+  }, []);
+
+  // Optimisation des callbacks avec useCallback
+  const selectEffect = useCallback(
+    (id: number) => {
+      setCurrentEffect(id);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "effect", id }));
+      }
+    },
+    [ws],
+  );
+
+  const selectColorMode = useCallback(
+    (mode: string) => {
+      setCurrentColorMode(mode);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: "param",
+            name: "colorMode",
+            value: mode,
+          }),
+        );
+      }
+    },
+    [ws],
+  );
+
+  const updateCustomColor = useCallback(
+    (r: number, g: number, b: number) => {
+      if (
+        ws &&
+        ws.readyState === WebSocket.OPEN &&
+        currentColorMode === "custom"
+      ) {
+        const rNorm = r / 255;
+        const gNorm = g / 255;
+        const bNorm = b / 255;
+        ws.send(
+          JSON.stringify({
+            type: "param",
+            name: "customColor",
+            value: `${rNorm},${gNorm},${bNorm}`,
+          }),
+        );
+      }
+    },
+    [ws, currentColorMode],
+  );
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        color: "white",
-        fontFamily: "Arial, sans-serif",
-      }}
-    >
-      <header
-        style={{
-          padding: "20px",
-          textAlign: "center",
-          borderBottom: "1px solid rgba(255,255,255,0.2)",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "2.5rem" }}>🎵 LED Visualizer</h1>
-        <p
-          style={{
-            margin: "10px 0 0 0",
-            opacity: 0.8,
-          }}
-        >
-          Status: {connected ? "🟢 Connected" : "🔴 Disconnected"}
-        </p>
-      </header>
+    <div className="container">
+      {/* Header avec statut de connexion */}
+      <div className="header">
+        <h1>
+          <span className="logo">🌈</span> LED Visualizer
+        </h1>
+        <div className="status">
+          <span className={connected ? "connected" : "disconnected"}>
+            {connected ? "● Connected" : "○ Disconnected"}
+          </span>
+          {connected && fps > 0 && <span className="fps">{fps} FPS</span>}
+        </div>
+      </div>
 
-      <main
-        style={{
-          display: "flex",
-          gap: "20px",
-          padding: "20px",
-          maxWidth: "1200px",
-          margin: "0 auto",
-        }}
-      >
-        {/* LED Preview */}
-        <div
-          style={{
-            flex: 1,
-            background: "rgba(255,255,255,0.1)",
-            borderRadius: "10px",
-            padding: "20px",
-          }}
-        >
-          <h2 style={{ marginTop: 0 }}>💡 LED Preview</h2>
+      {/* Prévisualisation LED */}
+      <div className="preview-section">
+        <div className="preview-container">
           <canvas
             ref={canvasRef}
             width={64}
             height={64}
-            style={{
-              width: "100%",
-              maxWidth: "400px",
-              height: "auto",
-              border: "2px solid rgba(255,255,255,0.3)",
-              borderRadius: "8px",
-              imageRendering: "pixelated",
-            }}
+            className="led-preview"
           />
+          <div className="preview-overlay">
+            <div className="preview-info">128×128 LED Matrix</div>
+          </div>
         </div>
+      </div>
 
-        {/* Controls */}
-        <div
-          style={{
-            flex: 1,
-            background: "rgba(255,255,255,0.1)",
-            borderRadius: "10px",
-            padding: "20px",
-          }}
-        >
-          <h2 style={{ marginTop: 0 }}>🎛️ Effects</h2>
-          <div
-            style={{
-              display: "grid",
-              gap: "10px",
-              marginBottom: "30px",
-            }}
-          >
-            {effects.map((effect) => (
-              <button
-                key={effect.id}
-                onClick={() => selectEffect(effect.id)}
-                style={{
-                  padding: "15px",
-                  border: "none",
-                  borderRadius: "8px",
-                  background:
-                    currentEffect === effect.id
-                      ? "rgba(255,255,255,0.3)"
-                      : "rgba(255,255,255,0.1)",
-                  color: "white",
-                  fontSize: "16px",
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                  textAlign: "left",
-                }}
-              >
-                <span style={{ fontSize: "24px", marginRight: "10px" }}>
-                  {effect.icon}
-                </span>
-                {effect.name}
-              </button>
-            ))}
-          </div>
-
-          <h3 style={{ marginBottom: "10px" }}>🎨 Color Mode</h3>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, 1fr)",
-              gap: "10px",
-              marginBottom: "20px",
-            }}
-          >
-            {colorModes.map((mode) => (
-              <button
-                key={mode.id}
-                onClick={() => selectColorMode(mode.id)}
-                style={{
-                  padding: "12px",
-                  border: "none",
-                  borderRadius: "8px",
-                  background:
-                    currentColorMode === mode.id
-                      ? "rgba(255,255,255,0.3)"
-                      : "rgba(255,255,255,0.1)",
-                  color: "white",
-                  fontSize: "14px",
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                  textAlign: "left",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <span style={{ fontSize: "20px" }}>{mode.icon}</span>
-                {mode.name}
-              </button>
-            ))}
-          </div>
-
-          {currentColorMode === "custom" && (
+      {/* Analyseur de spectre optimisé */}
+      <div className="spectrum-section">
+        <h2>Audio Spectrum</h2>
+        <div className="spectrum-bars">
+          {spectrum.map((value, index) => (
             <div
+              key={index}
+              className="spectrum-bar"
               style={{
-                marginBottom: "20px",
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                background: "rgba(255,255,255,0.1)",
-                padding: "10px",
-                borderRadius: "8px",
+                height: `${Math.max(2, value * 100)}%`,
+                backgroundColor: `hsl(${(index / spectrum.length) * 360}, 70%, 50%)`,
               }}
-            >
-              <label style={{ fontWeight: "bold" }}>Custom Color:</label>
-              <input
-                type="color"
-                value={customColor}
-                onChange={(e) => updateCustomColor(e.target.value)}
-                style={{
-                  width: "60px",
-                  height: "40px",
-                  border: "none",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                }}
-              />
-              <span style={{ fontSize: "12px", opacity: 0.8 }}>
-                {customColor}
-              </span>
-            </div>
-          )}
-
-          <h3>📊 Audio Spectrum</h3>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "end",
-              height: "100px",
-              gap: "2px",
-              background: "rgba(0,0,0,0.3)",
-              padding: "10px",
-              borderRadius: "8px",
-            }}
-          >
-            {spectrum.map((value, index) => (
-              <div
-                key={index}
-                style={{
-                  flex: 1,
-                  background: `hsl(${(index * 360) / spectrum.length}, 70%, 50%)`,
-                  height: `${value * 100}%`,
-                  minHeight: "2px",
-                  borderRadius: "2px 2px 0 0",
-                }}
-              />
-            ))}
-          </div>
+            />
+          ))}
         </div>
-      </main>
+      </div>
+
+      {/* Sélection des effets */}
+      <div className="effects-section">
+        <h2>Effects</h2>
+        <div className="effects-grid">
+          {effects.map((effect) => (
+            <button
+              key={effect.id}
+              className={`effect-button ${
+                currentEffect === effect.id ? "active" : ""
+              }`}
+              onClick={() => selectEffect(effect.id)}
+              disabled={!connected}
+            >
+              <span className="effect-icon">{effect.icon}</span>
+              <span className="effect-name">{effect.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Modes de couleur */}
+      <div className="color-section">
+        <h2>Color Mode</h2>
+        <div className="color-modes">
+          {colorModes.map((mode) => (
+            <button
+              key={mode.id}
+              className={`color-mode-button ${
+                currentColorMode === mode.id ? "active" : ""
+              }`}
+              onClick={() => selectColorMode(mode.id)}
+              disabled={!connected}
+            >
+              <span className="mode-icon">{mode.icon}</span>
+              <span className="mode-name">{mode.name}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Sélecteur de couleur personnalisée */}
+        {currentColorMode === "custom" && (
+          <div className="custom-color-picker">
+            <input
+              type="color"
+              value={customColor}
+              onChange={(e) => {
+                setCustomColor(e.target.value);
+                const r = parseInt(e.target.value.slice(1, 3), 16);
+                const g = parseInt(e.target.value.slice(3, 5), 16);
+                const b = parseInt(e.target.value.slice(5, 7), 16);
+                updateCustomColor(r, g, b);
+              }}
+              disabled={!connected}
+            />
+            <span>Custom Color</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
