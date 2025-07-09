@@ -6,8 +6,8 @@ use tokio::runtime::Runtime;
 mod audio;
 
 mod effects;
-mod ehub;
 mod fft;
+mod ihub;
 mod led;
 mod websocket;
 

@@ -21,14 +21,14 @@ pub struct EntityMapping {
 }
 
 /// Routeur eHub vers ArtNet
-pub struct EHubRouter {
+pub struct IHubRouter {
     socket: UdpSocket,
     controllers: Vec<ControllerConfig>,
     entity_mappings: HashMap<u16, EntityMapping>,
     dmx_buffers: HashMap<(String, u16), Vec<u8>>, // (IP, Universe) -> DMX data
 }
 
-impl EHubRouter {
+impl IHubRouter {
     pub fn new() -> Result<Self> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
 
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_router_initialization() {
-        let mut router = EHubRouter::new().unwrap();
+        let mut router = IHubRouter::new().unwrap();
 
         let controllers = vec![ControllerConfig {
             ip_address: "192.168.1.45".to_string(),
