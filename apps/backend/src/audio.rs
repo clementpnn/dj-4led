@@ -68,13 +68,13 @@ impl AudioCapture {
                 }
 
                 // Filtrer le bruit - ne passer les données que si le niveau est significatif
-                if avg_level > 0.001 || max_level > 0.005 {
+                if avg_level > 0.002 || max_level > 0.01 {
                     // Appliquer un gate de bruit simple
                     let filtered_data: Vec<f32> = data
                         .iter()
                         .map(|&x| {
                             let abs_x = x.abs();
-                            if abs_x < 0.002 {
+                            if abs_x < 0.004 {
                                 0.0 // Supprimer le bruit de fond
                             } else {
                                 x
