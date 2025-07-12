@@ -4,8 +4,8 @@ use rustfft::FftPlanner;
 
 const FFT_SIZE: usize = 1024;
 const SPECTRUM_SIZE: usize = 64;
-const NOISE_FLOOR: f32 = 0.0005; // Seuil de bruit pour filtrer le silence (divisé par 2)
-const MIN_THRESHOLD: f32 = 0.025; // Seuil minimum pour normalisation (divisé par 2)
+const NOISE_FLOOR: f32 = 0.001; // Seuil de bruit pour filtrer le silence (augmenté pour plus de filtrage)
+const MIN_THRESHOLD: f32 = 0.05; // Seuil minimum pour normalisation (augmenté pour plus de contraste)
 
 pub fn compute_spectrum(audio: &[f32]) -> Vec<f32> {
     let mut planner = FftPlanner::new();
@@ -58,7 +58,7 @@ pub fn compute_spectrum(audio: &[f32]) -> Vec<f32> {
             }
 
             if count > 0 {
-                spectrum[i] = (sum / count as f32).sqrt() * 0.5; // Diviser par 2 le volume détecté
+                spectrum[i] = (sum / count as f32).sqrt() * 0.25; // Diviser par 4 le volume détecté
             }
         }
     }
@@ -113,13 +113,13 @@ pub fn compute_spectrum(audio: &[f32]) -> Vec<f32> {
 
         for val in &mut smoothed {
             // Normaliser avec courbe de réponse et diviser par 2
-            *val = (*val * norm_factor * 0.5).powf(0.7 + dynamic_factor * 0.3);
+            *val = (*val * norm_factor * 0.25).powf(0.7 + dynamic_factor * 0.3);
             *val = val.min(1.0);
         }
     } else {
         // Si le signal est trop faible, appliquer un gain minimal
         for val in &mut smoothed {
-            *val = (*val * 10.0).min(0.1); // Gain léger pour les signaux très faibles (divisé par 2)
+            *val = (*val * 5.0).min(0.05); // Gain léger pour les signaux très faibles (divisé par 4)
         }
     }
 
