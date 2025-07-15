@@ -38,6 +38,7 @@ impl PacketType {
 
 // Flags pour les options du paquet
 bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct PacketFlags: u8 {
         const NONE = 0x00;
         const COMPRESSED = 0x01;
@@ -232,7 +233,6 @@ impl UdpCommand {
                 Some(Self::SetEffect(u32::from_le_bytes(id_bytes) as usize))
             }
             0x02 => {
-                let remaining = data.len() - 1;
                 let mode = String::from_utf8(data[1..].to_vec()).ok()?;
                 Some(Self::SetColorMode(mode))
             }
