@@ -1,7 +1,6 @@
 use anyhow::Result;
 use parking_lot::Mutex;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
 
 mod audio;
 
@@ -9,14 +8,14 @@ mod effects;
 mod fft;
 mod ihub;
 mod led;
-mod websocket;
+mod udp;
 
 use audio::AudioCapture;
 
 use effects::EffectEngine;
 use led::{LedController, LedMode};
 use std::env;
-use websocket::WebSocketServer;
+use udp::UdpServer;
 
 pub struct AppState {
     pub spectrum: Mutex<Vec<f32>>,
@@ -133,12 +132,9 @@ fn main() -> Result<()> {
         }
     });
 
-    // Serveur WebSocket (async)
-    let rt = Runtime::new()?;
-    rt.block_on(async {
-        let server = WebSocketServer::new(state);
-        server.run().await
-    })?;
+    // Serveur UDP
+    let server = UdpServer::new(state)?;
+    server.run()?;
 
     Ok(())
 }

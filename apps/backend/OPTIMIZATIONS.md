@@ -1,14 +1,15 @@
-# Optimisations du Protocole iHub et de la Connexion WebSocket
+# Optimisations du Protocole iHub et de la Connexion UDP
 
 ## Vue d'ensemble
 
-Ce document détaille les optimisations apportées au protocole de communication (renommé de eHub vers iHub) et à la connexion WebSocket entre le frontend et le backend Rust.
+Ce document détaille les optimisations apportées au protocole de communication (renommé de eHub vers iHub) et à la connexion UDP entre le frontend et le backend Rust.
 
 ## 1. Optimisations du Protocole iHub
 
 ### 1.1 Gestion Mémoire Optimisée
 
 - **Buffers Pré-alloués**: Utilisation de buffers réutilisables pour éviter les allocations répétées
+
   ```rust
   send_buffer: Vec::with_capacity(65507), // Max UDP size
   compression_buffer: Vec::with_capacity(32768),
@@ -36,7 +37,7 @@ Ce document détaille les optimisations apportées au protocole de communication
 - **Inline Functions**: Fonctions critiques marquées `#[inline(always)]`
 - **Binary Search**: Recherche binaire O(log n) pour les lookups d'entités
 
-## 2. Optimisations WebSocket
+## 2. Optimisations UDP
 
 ### 2.1 Configuration Réseau
 
@@ -151,12 +152,14 @@ reconnect_delay: 5000ms
 ## 7. Tests de Performance
 
 Exécuter les benchmarks:
+
 ```bash
 cd apps/backend
 cargo bench --features benchmark
 ```
 
 Les tests couvrent:
+
 - Conversion frame->entités
 - Compression GZip
 - Mises à jour différentielles
@@ -168,7 +171,7 @@ Les tests couvrent:
 
 ### 8.1 Métriques Backend
 
-- FPS effectif via logs WebSocket
+- FPS effectif via statistiques UDP
 - Utilisation CPU/RAM via système
 - Latence réseau via wireshark/tcpdump
 
