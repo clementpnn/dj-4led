@@ -1,11 +1,8 @@
 use flate2::read::GzDecoder;
-use std::io::{Cursor, Read, Write};
-use std::net::UdpSocket;
+use std::io::{Cursor, Read};
+use std::net::{SocketAddr, UdpSocket};
 use std::thread;
 use std::time::{Duration, Instant};
-
-// Protocol constants
-const MAX_PACKET_SIZE: usize = 1472;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -234,14 +231,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create UDP socket
     let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.connect("localhost:8080")?;
     socket.set_nonblocking(true)?;
+    let server_addr: SocketAddr = "127.0.0.1:8081".parse()?;
 
-    println!("Connected to localhost:8080");
+    println!("Bound to local socket, server at {}", server_addr);
 
     // Send connect packet
     let connect_packet = create_connect_packet(true);
-    socket.send(&connect_packet)?;
+    socket.send_to(&connect_packet, server_addr)?;
     println!("Sent connect packet (compression enabled)");
 
     let mut sequence = 1u32;
@@ -256,8 +253,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Main loop
     loop {
         // Receive packets
-        match socket.recv(&mut receive_buffer) {
-            Ok(len) => match UdpPacket::from_bytes(&receive_buffer[..len]) {
+        match socket.recv_from(&mut receive_buffer) {
+            Ok((len, _addr)) => match UdpPacket::from_bytes(&receive_buffer[..len]) {
                 Ok(packet) => match packet.packet_type {
                     PacketType::Ack => {
                         println!("Received ACK for sequence {}", packet.sequence);
@@ -296,7 +293,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Send periodic ping
         if last_ping.elapsed() > Duration::from_secs(30) {
             let ping_packet = create_ping_packet(sequence);
-            socket.send(&ping_packet)?;
+            socket.send_to(&ping_packet, server_addr)?;
             println!("Sent PING (sequence {})", sequence);
             sequence += 1;
             last_ping = Instant::now();
@@ -310,7 +307,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if effect_id % 2 == 0 {
                 // Send effect change
                 let cmd_packet = create_command_set_effect(sequence, effect_id);
-                socket.send(&cmd_packet)?;
+                socket.send_to(&cmd_packet, server_addr)?;
                 println!("Sent command: SetEffect({})", effect_id);
             } else {
                 // Send color change
@@ -318,7 +315,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let g = ((effect_id as f32) * 0.2) % 1.0;
                 let b = ((effect_id as f32) * 0.3) % 1.0;
                 let cmd_packet = create_command_set_color(sequence, r, g, b);
-                socket.send(&cmd_packet)?;
+                socket.send_to(&cmd_packet, server_addr)?;
                 println!("Sent command: SetColor({:.2}, {:.2}, {:.2})", r, g, b);
             }
 

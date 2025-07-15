@@ -28,11 +28,28 @@ struct ClientInfo {
 
 impl UdpServer {
     pub fn new(state: Arc<AppState>) -> Result<Self> {
-        let socket = UdpSocket::bind("0.0.0.0:8080")?;
-        socket.set_nonblocking(true)?;
+        println!("🔧 Creating UDP socket on 0.0.0.0:8081...");
+        let socket = match UdpSocket::bind("0.0.0.0:8081") {
+            Ok(s) => {
+                println!("✅ UDP socket bound successfully");
+                s
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to bind UDP socket: {}", e);
+                return Err(e.into());
+            }
+        };
 
-        // Optimisations UDP
-        #[cfg(target_os = "linux")]
+        match socket.set_nonblocking(true) {
+            Ok(_) => println!("✅ Socket set to non-blocking mode"),
+            Err(e) => {
+                eprintln!("❌ Failed to set non-blocking mode: {}", e);
+                return Err(e.into());
+            }
+        }
+
+        // Optimisations UDP pour Linux et macOS
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use std::os::unix::io::AsRawFd;
             let fd = socket.as_raw_fd();
@@ -44,14 +61,14 @@ impl UdpServer {
                     libc::SOL_SOCKET,
                     libc::SO_RCVBUF,
                     &size as *const _ as *const libc::c_void,
-                    std::mem::size_of::<libc::c_int>() as u32,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
                 );
                 libc::setsockopt(
                     fd,
                     libc::SOL_SOCKET,
                     libc::SO_SNDBUF,
                     &size as *const _ as *const libc::c_void,
-                    std::mem::size_of::<libc::c_int>() as u32,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
                 );
             }
         }
@@ -64,7 +81,7 @@ impl UdpServer {
     }
 
     pub fn run(self) -> Result<()> {
-        println!("🚀 UDP server listening on udp://0.0.0.0:8080");
+        println!("🚀 UDP server listening on udp://0.0.0.0:8081");
 
         let state = self.state.clone();
         let clients = self.clients.clone();
@@ -72,12 +89,14 @@ impl UdpServer {
 
         // Thread pour envoyer les données aux clients
         thread::spawn(move || {
+            println!("📤 UDP sender thread started");
             if let Err(e) = Self::sender_loop(socket, state, clients) {
                 eprintln!("UDP sender error: {}", e);
             }
         });
 
         // Thread principal pour recevoir les commandes
+        println!("📥 Starting UDP receiver loop");
         self.receiver_loop()
     }
 
@@ -89,6 +108,8 @@ impl UdpServer {
         let mut processor = UdpFrameProcessor::new();
         let mut last_cleanup = Instant::now();
         let mut stats = TransmissionStats::new();
+
+        println!("📡 UDP sender loop started");
 
         loop {
             // Nettoyage périodique des clients inactifs
@@ -104,6 +125,10 @@ impl UdpServer {
 
             // Traiter et envoyer aux clients actifs
             let clients_snapshot = clients.lock().clone();
+
+            if !clients_snapshot.is_empty() {
+                println!("📤 Sending to {} clients", clients_snapshot.len());
+            }
 
             for mut client in clients_snapshot {
                 // Préparer les paquets selon le type de client
@@ -147,15 +172,39 @@ impl UdpServer {
 
     fn receiver_loop(&self) -> Result<()> {
         let mut buf = [0u8; 1024];
+        let mut packets_received = 0u64;
+        let mut last_log = Instant::now();
+
+        println!("👂 UDP receiver ready, waiting for packets...");
 
         loop {
             match self.socket.recv_from(&mut buf) {
                 Ok((len, addr)) => {
+                    packets_received += 1;
+                    println!(
+                        "📨 Received {} bytes from {} (total: {})",
+                        len, addr, packets_received
+                    );
+
                     if let Ok(packet) = UdpPacket::from_bytes(&buf[..len]) {
+                        println!(
+                            "📦 Packet type: {:?}, sequence: {}",
+                            packet.packet_type, packet.sequence
+                        );
                         self.handle_packet(packet, addr);
+                    } else {
+                        println!("⚠️  Failed to parse packet from {}", addr);
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // Log periodically that we're still listening
+                    if last_log.elapsed() > Duration::from_secs(10) {
+                        println!(
+                            "👂 Still listening... (packets received: {})",
+                            packets_received
+                        );
+                        last_log = Instant::now();
+                    }
                     thread::sleep(Duration::from_millis(10));
                 }
                 Err(e) => {

@@ -4,7 +4,7 @@
 
 The DJ-4LED backend now uses UDP for real-time data transmission instead of WebSocket. This provides lower latency and better performance for LED visualization data streaming.
 
-**Server Address**: `udp://localhost:8080`
+**Server Address**: `udp://localhost:8081`
 
 ## Protocol Structure
 
@@ -23,28 +23,28 @@ Total header size: 12 bytes
 
 ### Packet Types
 
-| Type | Value | Description |
-|------|-------|-------------|
-| Connect | 0x01 | Initial connection request |
-| Disconnect | 0x02 | Clean disconnection |
-| Ping | 0x03 | Keep-alive ping |
-| Pong | 0x04 | Ping response |
-| Ack | 0x05 | Acknowledgment |
-| Command | 0x10 | Command from client |
-| FrameData | 0x20 | LED frame data |
-| FrameDataCompressed | 0x21 | Compressed LED frame data |
-| SpectrumData | 0x30 | Audio spectrum data |
+| Type                | Value | Description                |
+| ------------------- | ----- | -------------------------- |
+| Connect             | 0x01  | Initial connection request |
+| Disconnect          | 0x02  | Clean disconnection        |
+| Ping                | 0x03  | Keep-alive ping            |
+| Pong                | 0x04  | Ping response              |
+| Ack                 | 0x05  | Acknowledgment             |
+| Command             | 0x10  | Command from client        |
+| FrameData           | 0x20  | LED frame data             |
+| FrameDataCompressed | 0x21  | Compressed LED frame data  |
+| SpectrumData        | 0x30  | Audio spectrum data        |
 
 ### Flags
 
 Flags are bitwise combinable:
 
-| Flag | Value | Description |
-|------|-------|-------------|
-| COMPRESSED | 0x01 | Payload is compressed with gzip |
-| FRAGMENTED | 0x02 | Packet is part of a fragmented message |
-| LAST_FRAGMENT | 0x04 | This is the last fragment |
-| REQUIRES_ACK | 0x08 | Sender expects acknowledgment |
+| Flag          | Value | Description                            |
+| ------------- | ----- | -------------------------------------- |
+| COMPRESSED    | 0x01  | Payload is compressed with gzip        |
+| FRAGMENTED    | 0x02  | Packet is part of a fragmented message |
+| LAST_FRAGMENT | 0x04  | This is the last fragment              |
+| REQUIRES_ACK  | 0x08  | Sender expects acknowledgment          |
 
 ## Connection Flow
 
@@ -71,6 +71,7 @@ The server will respond with an Ack packet if successful.
 The server continuously sends two types of data:
 
 #### Frame Data (LED visualization)
+
 - Type: 0x20 (uncompressed) or 0x21 (compressed)
 - Payload structure:
   ```
@@ -84,6 +85,7 @@ The server continuously sends two types of data:
 - Data order: Row-major, top-to-bottom, left-to-right
 
 #### Spectrum Data (Audio frequencies)
+
 - Type: 0x30
 - Payload structure:
   ```
@@ -100,6 +102,7 @@ The server continuously sends two types of data:
 Commands are sent with packet type 0x10:
 
 #### Set Effect Command
+
 ```rust
 // Command ID: 0x01
 // Payload: [0x01, effect_id(4B)]
@@ -110,6 +113,7 @@ Commands are sent with packet type 0x10:
 ```
 
 #### Set Color Mode Command
+
 ```rust
 // Command ID: 0x02
 // Payload: [0x02, mode_string_bytes...]
@@ -120,6 +124,7 @@ Commands are sent with packet type 0x10:
 ```
 
 #### Set Custom Color Command
+
 ```rust
 // Command ID: 0x03
 // Payload: [0x03, r(4B), g(4B), b(4B)]
@@ -130,6 +135,7 @@ Commands are sent with packet type 0x10:
 ```
 
 #### Set Parameter Command
+
 ```rust
 // Command ID: 0x04
 // Payload: [0x04, name_len(2B), name_bytes, value_len(2B), value_bytes]
@@ -164,6 +170,7 @@ Large messages (> 1460 bytes) are automatically fragmented:
 ## Compression
 
 When receiving compressed data (COMPRESSED flag set):
+
 1. The payload is gzip-compressed
 2. Decompress before processing
 3. Compressed frames use packet type 0x21
@@ -189,7 +196,7 @@ use std::net::UdpSocket;
 
 // Create socket
 let socket = UdpSocket::bind("0.0.0.0:0")?;
-socket.connect("localhost:8080")?;
+socket.connect("localhost:8081")?;
 
 // Send connect packet
 let connect_packet = create_connect_packet();
@@ -217,6 +224,7 @@ loop {
 ## Binary Format Examples
 
 ### Connect Packet (12 bytes)
+
 ```
 01 00 00 00 00 00 00 00 01 00 00 00
 │  │  └─────┴─────┘ └──┴──┘ └──┴──┘
@@ -226,6 +234,7 @@ loop {
 ```
 
 ### Frame Data Packet (compressed, 64x64 RGB)
+
 ```
 21 01 2A 00 00 00 00 00 01 00 [size] [gzip data...]
 │  │  └─────┴─────┘ └──┴──┘    └──┴──┘
@@ -235,6 +244,7 @@ loop {
 ```
 
 ### Command Packet (Set Effect ID 3)
+
 ```
 10 00 15 00 00 00 00 00 01 00 05 00 01 03 00 00 00
 │  │  └─────┴─────┘            └──┴──┘ │  └─────┴─────┘
@@ -269,7 +279,7 @@ Test the UDP server with netcat:
 
 ```bash
 # Send a hex-encoded connect packet
-echo -n -e "\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00" | nc -u localhost 8080
+echo -n -e "\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00" | nc -u localhost 8081
 ```
 
 Or use the included test client (if provided).

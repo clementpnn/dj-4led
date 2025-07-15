@@ -393,6 +393,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cpal",
  "flate2",
+ "libc",
  "num-complex",
  "parking_lot",
  "rayon",
