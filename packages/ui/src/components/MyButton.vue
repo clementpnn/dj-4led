@@ -1,9 +1,9 @@
 <script setup lang="ts">
-    defineProps<{ onClick?: () => void }>()
+defineProps<{ onClick?: () => void }>();
 </script>
 
 <template>
-    <button class="btn" @click="onClick">
-        <slot />
-    </button>
+  <button class="btn" @click="onClick">
+    <slot />
+  </button>
 </template>
