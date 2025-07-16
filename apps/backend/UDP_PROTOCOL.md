@@ -72,30 +72,30 @@ The server continuously sends two types of data:
 
 #### Frame Data (LED visualization)
 
-- Type: 0x20 (uncompressed) or 0x21 (compressed)
-- Payload structure:
-  ```
-  ┌────────┬────────┬────────┬──────────┐
-  │ Width  │ Height │ Format │ RGB Data │
-  │ (2B)   │ (2B)   │ (1B)   │ (var)    │
-  └────────┴────────┴────────┴──────────┘
-  ```
-- Default resolution: 64x64 pixels
-- Format: 0x01 = RGB (3 bytes per pixel)
-- Data order: Row-major, top-to-bottom, left-to-right
+-   Type: 0x20 (uncompressed) or 0x21 (compressed)
+-   Payload structure:
+    ```
+    ┌────────┬────────┬────────┬──────────┐
+    │ Width  │ Height │ Format │ RGB Data │
+    │ (2B)   │ (2B)   │ (1B)   │ (var)    │
+    └────────┴────────┴────────┴──────────┘
+    ```
+-   Default resolution: 64x64 pixels
+-   Format: 0x01 = RGB (3 bytes per pixel)
+-   Data order: Row-major, top-to-bottom, left-to-right
 
 #### Spectrum Data (Audio frequencies)
 
-- Type: 0x30
-- Payload structure:
-  ```
-  ┌─────────────┬───────────────────┐
-  │ Band Count  │ Float Values      │
-  │ (2B)        │ (4B × band_count) │
-  └─────────────┴───────────────────┘
-  ```
-- Typically 32 frequency bands
-- Values are normalized (0.0 to 1.0)
+-   Type: 0x30
+-   Payload structure:
+    ```
+    ┌─────────────┬───────────────────┐
+    │ Band Count  │ Float Values      │
+    │ (2B)        │ (4B × band_count) │
+    └─────────────┴───────────────────┘
+    ```
+-   Typically 32 frequency bands
+-   Values are normalized (0.0 to 1.0)
 
 ### 3. Sending Commands
 
