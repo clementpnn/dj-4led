@@ -1,0 +1,51 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup pnpm cache
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --shamefully-hoist
+
+      - name: Setup ESLint config symlink
+        run: |
+          mkdir -p node_modules/@monorepo
+          ln -sf $(pwd)/packages/shared/eslint-config node_modules/@monorepo/eslint-config
+
+      - name: Run ESLint
+        run: pnpm lint
+        working-directory: ./packages/shared
+
+      - name: Check Prettier formatting
+        run: pnpm format
+        working-directory: ./packages/shared
+
+      - name: Build the app
+        run: pnpm build
+        working-directory: ./packages/shared
