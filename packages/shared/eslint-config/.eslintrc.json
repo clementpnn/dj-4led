@@ -27,7 +27,7 @@
   ],
   "ignorePatterns": ["dist"],
   "rules": {
-    "no-console": "warn",
+    "no-console": "error",
     "@typescript-eslint/explicit-module-boundary-types": "off",
     "@typescript-eslint/no-explicit-any": "warn",
     "prettier/prettier": "error",
