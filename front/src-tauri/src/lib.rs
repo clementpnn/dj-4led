@@ -1,6 +1,9 @@
 // src-tauri/src/lib.rs
 use std::net::UdpSocket;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
+use tauri::{State, Window, Emitter};
+use serde_json::json;
 
 // Packet types selon la doc DJ-4LED
 const CONNECT: u8 = 0x01;
@@ -21,6 +24,9 @@ const SET_CUSTOM_COLOR: u8 = 0x03;
 // Server configuration
 const SERVER_ADDRESS: &str = "127.0.0.1:8081";
 
+// Global connection state
+type ConnectionState = Arc<Mutex<Option<UdpSocket>>>;
+
 // Structure de paquet UDP (12 bytes header + payload)
 fn create_packet(packet_type: u8, flags: u8, sequence: u32, payload: Vec<u8>) -> Vec<u8> {
     let mut packet = Vec::with_capacity(12 + payload.len());
@@ -36,10 +42,10 @@ fn create_packet(packet_type: u8, flags: u8, sequence: u32, payload: Vec<u8>) ->
 
 fn create_socket_with_timeout(timeout_secs: u64) -> Result<UdpSocket, String> {
     let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Erreur création socket: {}", e))?;
+        .map_err(|e| format!("Socket creation error: {}", e))?;
 
     socket.set_read_timeout(Some(Duration::from_secs(timeout_secs)))
-        .map_err(|e| format!("Erreur configuration timeout: {}", e))?;
+        .map_err(|e| format!("Timeout configuration error: {}", e))?;
 
     Ok(socket)
 }
@@ -52,60 +58,66 @@ fn get_timestamp() -> u32 {
 }
 
 #[tauri::command]
-async fn dj_connect() -> Result<String, String> {
+async fn dj_connect(connection: State<'_, ConnectionState>) -> Result<String, String> {
     let socket = create_socket_with_timeout(3)?;
 
     // Packet Connect selon la doc
     let connect_packet = create_packet(CONNECT, 0x00, 0, vec![]);
 
     socket.send_to(&connect_packet, SERVER_ADDRESS)
-        .map_err(|e| format!("Connexion échouée: {}", e))?;
+        .map_err(|e| format!("Connection failed: {}", e))?;
 
     // Attendre ACK
     let mut buf = [0; 1024];
     match socket.recv_from(&mut buf) {
         Ok((len, addr)) => {
             if len >= 1 && buf[0] == ACK {
-                Ok(format!("✅ Connecté au serveur DJ-4LED ({})", addr))
+                if let Ok(mut conn) = connection.lock() {
+                    *conn = Some(socket);
+                }
+                Ok(format!("✅ Connected to DJ-4LED server ({})", addr))
             } else {
-                Ok(format!("⚠️ Réponse inattendue: type {:#04x}", buf[0]))
+                Ok(format!("⚠️ Unexpected response: type {:#04x}", buf[0]))
             }
         }
         Err(e) => {
             if e.kind() == std::io::ErrorKind::TimedOut {
-                Ok("⏰ Timeout - serveur DJ-4LED hors ligne".to_string())
+                Ok("⏰ Timeout - DJ-4LED server offline".to_string())
             } else {
-                Err(format!("Erreur réception: {}", e))
+                Err(format!("Reception error: {}", e))
             }
         }
     }
 }
 
 #[tauri::command]
-async fn dj_disconnect() -> Result<String, String> {
+async fn dj_disconnect(connection: State<'_, ConnectionState>) -> Result<String, String> {
     let socket = create_socket_with_timeout(2)?;
 
     // Packet Disconnect selon la doc
     let disconnect_packet = create_packet(DISCONNECT, 0x00, get_timestamp(), vec![]);
 
     socket.send_to(&disconnect_packet, SERVER_ADDRESS)
-        .map_err(|e| format!("Déconnexion échouée: {}", e))?;
+        .map_err(|e| format!("Disconnection failed: {}", e))?;
 
-    // Optionnel: attendre confirmation (ACK)
+    if let Ok(mut conn) = connection.lock() {
+        *conn = None;
+    }
+
     let mut buf = [0; 1024];
     match socket.recv_from(&mut buf) {
         Ok((len, _)) => {
             if len >= 1 && buf[0] == ACK {
-                Ok("✅ Déconnecté proprement du serveur DJ-4LED".to_string())
+                Ok("✅ Cleanly disconnected from DJ-4LED server".to_string())
             } else {
-                Ok("✅ Déconnexion envoyée (pas de confirmation)".to_string())
+                Ok("✅ Disconnection sent (no confirmation)".to_string())
             }
         }
         Err(e) => {
             if e.kind() == std::io::ErrorKind::TimedOut {
-                Ok("✅ Déconnexion envoyée (timeout sur confirmation)".to_string())
+                Ok("✅ Disconnection sent (timeout on confirmation)".to_string())
             } else {
-                Ok("✅ Déconnexion envoyée".to_string())
+                Err(format!("Disconnection error: {}", e))
             }
         }
     }
@@ -118,22 +130,22 @@ async fn dj_ping() -> Result<String, String> {
     let ping_packet = create_packet(PING, 0x00, get_timestamp(), vec![]);
 
     socket.send_to(&ping_packet, SERVER_ADDRESS)
-        .map_err(|e| format!("Ping échoué: {}", e))?;
+        .map_err(|e| format!("Ping failed: {}", e))?;
 
     let mut buf = [0; 1024];
     match socket.recv_from(&mut buf) {
         Ok((len, addr)) => {
             if len >= 1 && buf[0] == PONG {
-                Ok(format!("🏓 PONG reçu de {}", addr))
+                Ok(format!("🏓 PONG received from {}", addr))
             } else {
-                Ok(format!("⚠️ Réponse ping inattendue: type {:#04x}", buf[0]))
+                Ok(format!("⚠️ Unexpected ping response: type {:#04x}", buf[0]))
             }
         }
         Err(e) => {
             if e.kind() == std::io::ErrorKind::TimedOut {
-                Ok("⏰ Timeout - serveur ne répond pas au ping".to_string())
+                Ok("⏰ Timeout - server doesn't respond to ping".to_string())
             } else {
-                Err(format!("Erreur ping: {}", e))
+                Err(format!("Ping error: {}", e))
             }
         }
     }
@@ -149,9 +161,9 @@ async fn dj_set_effect(effect_id: u32) -> Result<String, String> {
     let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
 
     socket.send_to(&packet, SERVER_ADDRESS)
-        .map_err(|e| format!("Commande effet échouée: {}", e))?;
+        .map_err(|e| format!("Effect command failed: {}", e))?;
 
-    Ok(format!("✅ Effet {} appliqué", effect_id))
+    Ok(format!("✅ Effect {} applied", effect_id))
 }
 
 #[tauri::command]
@@ -164,9 +176,9 @@ async fn dj_set_color_mode(mode: String) -> Result<String, String> {
     let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
 
     socket.send_to(&packet, SERVER_ADDRESS)
-        .map_err(|e| format!("Commande mode couleur échouée: {}", e))?;
+        .map_err(|e| format!("Color mode command failed: {}", e))?;
 
-    Ok(format!("✅ Mode couleur '{}' appliqué", mode))
+    Ok(format!("✅ Color mode '{}' applied", mode))
 }
 
 #[tauri::command]
@@ -181,19 +193,18 @@ async fn dj_set_custom_color(r: f32, g: f32, b: f32) -> Result<String, String> {
     let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
 
     socket.send_to(&packet, SERVER_ADDRESS)
-        .map_err(|e| format!("Commande couleur personnalisée échouée: {}", e))?;
+        .map_err(|e| format!("Custom color command failed: {}", e))?;
 
-    Ok(format!("✅ Couleur RGB({:.3}, {:.3}, {:.3}) appliquée", r, g, b))
+    Ok(format!("✅ Color RGB({:.3}, {:.3}, {:.3}) applied", r, g, b))
 }
 
 #[tauri::command]
-async fn dj_listen_data() -> Result<String, String> {
+async fn dj_listen_data(window: Window) -> Result<String, String> {
     let socket = create_socket_with_timeout(8)?;
 
-    // Se connecter d'abord avec support compression
     let connect_packet = create_packet(CONNECT, 0x01, 0, vec![]);
     socket.send_to(&connect_packet, SERVER_ADDRESS)
-        .map_err(|e| format!("Connexion stream échouée: {}", e))?;
+        .map_err(|e| format!("Stream connection failed: {}", e))?;
 
     let mut buf = [0; 2048];
     let mut packets = 0;
@@ -208,7 +219,7 @@ async fn dj_listen_data() -> Result<String, String> {
     while start_time.elapsed() < max_duration {
         match socket.recv_from(&mut buf) {
             Ok((len, _)) => {
-                if len >= 1 {
+                if len >= 12 {
                     packets += 1;
                     match buf[0] {
                         ACK => {
@@ -216,15 +227,45 @@ async fn dj_listen_data() -> Result<String, String> {
                         }
                         FRAME_DATA => {
                             frames += 1;
+                            if len >= 17 {
+                                let width = u16::from_le_bytes([buf[12], buf[13]]);
+                                let height = u16::from_le_bytes([buf[14], buf[15]]);
+                                let format = buf[16];
+
+                                let frame_data = json!({
+                                    "width": width,
+                                    "height": height,
+                                    "format": format,
+                                    "data": &buf[17..len]
+                                });
+
+                                let _ = window.emit("frame_data", frame_data);
+                            }
                         }
                         FRAME_DATA_COMPRESSED => {
                             frames += 1;
+                            let compressed_data = &buf[12..len];
+                            let _ = window.emit("frame_data_compressed", compressed_data);
                         }
                         SPECTRUM_DATA => {
                             spectrum += 1;
+                            if len >= 14 {
+                                let band_count = u16::from_le_bytes([buf[12], buf[13]]);
+                                if len >= 14 + (band_count as usize * 4) {
+                                    let mut spectrum_values = Vec::with_capacity(band_count as usize);
+                                    for i in 0..band_count {
+                                        let offset = 14 + (i as usize * 4);
+                                        let value = f32::from_le_bytes([
+                                            buf[offset], buf[offset + 1],
+                                            buf[offset + 2], buf[offset + 3]
+                                        ]);
+                                        spectrum_values.push(value);
+                                    }
+                                    let _ = window.emit("spectrum_data", spectrum_values);
+                                }
+                            }
                         }
                         _ => {
-                            // Autres types de paquets ignorés
                         }
                     }
                 }
@@ -233,29 +274,28 @@ async fn dj_listen_data() -> Result<String, String> {
                 if e.kind() == std::io::ErrorKind::TimedOut {
                     continue;
                 } else {
-                    return Err(format!("Erreur écoute stream: {}", e));
+                    return Err(format!("Stream listen error: {}", e));
                 }
             }
         }
     }
 
     if !ack_received {
-        return Ok("⚠️ Aucune confirmation de connexion reçue".to_string());
+        return Ok("⚠️ No connection confirmation received".to_string());
     }
 
     if packets == 1 && frames == 0 && spectrum == 0 {
-        Ok("📡 Connecté mais aucune donnée reçue (serveur silencieux)".to_string())
+        Ok("📡 Connected but no data received (silent server)".to_string())
     } else {
-        Ok(format!("📡 Stream reçu: {} paquets ({} frames, {} spectrum)", packets, frames, spectrum))
+        Ok(format!("📡 Stream received: {} packets ({} frames, {} spectrum)", packets, frames, spectrum))
     }
 }
 
 #[tauri::command]
 async fn dj_get_server_info() -> Result<String, String> {
-    Ok(format!("🖥️ Serveur DJ-4LED: {}", SERVER_ADDRESS))
+    Ok(format!("🖥️ DJ-4LED Server: {}", SERVER_ADDRESS))
 }
 
-// Garde ta fonction greet
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -263,8 +303,11 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let connection_state: ConnectionState = Arc::new(Mutex::new(None));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(connection_state)
         .invoke_handler(tauri::generate_handler![
             greet,
             dj_connect,
