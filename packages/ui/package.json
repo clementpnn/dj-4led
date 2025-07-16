@@ -18,8 +18,8 @@
     "vue": "^3.4.15"
   },
   "devDependencies": {
-    "vue-tsc": "^2.2.10",
+    "@monorepo/typescript-config": "workspace:*",
     "@vue/tsconfig": "^0.7.0",
-    "typescript": "~5.8.3"
+    "vue-tsc": "^2.2.10"
   }
 }

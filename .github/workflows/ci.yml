@@ -46,6 +46,10 @@ jobs:
         run: pnpm format
         working-directory: ./packages/shared
 
+      - name: Run TypeScript type checking
+        run: pnpm type-check
+        working-directory: ./packages/shared
+
       - name: Build the app
         run: pnpm build
         working-directory: ./packages/shared
