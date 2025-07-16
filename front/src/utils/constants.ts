@@ -19,22 +19,23 @@ export interface ColorChannel {
 }
 
 export const EFFECTS: Effect[] = [
+    { id: 0, name: 'Wave', emoji: '🌊' },
     { id: 1, name: 'Pulse', emoji: '💓' },
-    { id: 2, name: 'Wave', emoji: '🌊' },
-    { id: 3, name: 'Strobe', emoji: '⚡' },
-    { id: 4, name: 'Rainbow', emoji: '🌈' },
-    { id: 5, name: 'Matrix', emoji: '🔢' },
-    { id: 6, name: 'Fire', emoji: '🔥' },
-    { id: 7, name: 'Ocean', emoji: '🌊' },
-    { id: 8, name: 'Space', emoji: '🌌' },
+    { id: 2, name: 'Strobe', emoji: '⚡' },
+    { id: 3, name: 'Rainbow', emoji: '🌈' },
+    { id: 4, name: 'Matrix', emoji: '🔢' },
+    { id: 5, name: 'Fire', emoji: '🔥' },
+    { id: 6, name: 'Ocean', emoji: '🌊' },
+    { id: 7, name: 'Space', emoji: '🌌' },
 ];
 
 export const COLOR_MODES: ColorMode[] = [
     { value: 'rainbow', label: 'Rainbow', emoji: '🌈' },
-    { value: 'solid', label: 'Solid', emoji: '🔵' },
-    { value: 'pulse', label: 'Pulse', emoji: '💓' },
-    { value: 'strobe', label: 'Strobe', emoji: '⚡' },
-    { value: 'fade', label: 'Fade', emoji: '🌅' },
+    { value: 'fire', label: 'Fire', emoji: '🔥' },
+    { value: 'ocean', label: 'Ocean', emoji: '🌊' },
+    { value: 'sunset', label: 'Sunset', emoji: '🌅' },
+    { value: 'matrix', label: 'Matrix', emoji: '🌿' },
+    { value: 'custom', label: 'Custom', emoji: '🎨' },
 ];
 
 export const COLOR_CHANNELS: ColorChannel[] = [
