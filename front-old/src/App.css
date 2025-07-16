@@ -1,420 +1,424 @@
 /* Reset et variables globales */
 :root {
-  --primary-color: #667eea;
-  --secondary-color: #764ba2;
-  --background-dark: #1a1a2e;
-  --background-light: #16213e;
-  --text-primary: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.8);
-  --accent-color: #00ff88;
-  --error-color: #ff4757;
-  --border-radius: 12px;
-  --transition-speed: 0.2s;
+    --primary-color: #667eea;
+    --secondary-color: #764ba2;
+    --background-dark: #1a1a2e;
+    --background-light: #16213e;
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.8);
+    --accent-color: #00ff88;
+    --error-color: #ff4757;
+    --border-radius: 12px;
+    --transition-speed: 0.2s;
 }
 
 * {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, var(--background-dark) 0%, var(--background-light) 100%);
-  color: var(--text-primary);
-  min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans',
+        'Droid Sans', 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: linear-gradient(135deg, var(--background-dark) 0%, var(--background-light) 100%);
+    color: var(--text-primary);
+    min-height: 100vh;
 }
 
 /* Container principal */
 .container {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 20px;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
 }
 
 /* Header */
 .header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 30px;
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border-radius: var(--border-radius);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 30px;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border-radius: var(--border-radius);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .header h1 {
-  font-size: 2rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+    font-size: 2rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .logo {
-  font-size: 2.5rem;
-  animation: pulse 2s ease-in-out infinite;
+    font-size: 2.5rem;
+    animation: pulse 2s ease-in-out infinite;
 }
 
 @keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
+    0%,
+    100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.1);
+    }
 }
 
 .status {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-size: 0.9rem;
 }
 
 .connected {
-  color: var(--accent-color);
-  font-weight: 600;
+    color: var(--accent-color);
+    font-weight: 600;
 }
 
 .disconnected {
-  color: var(--error-color);
-  font-weight: 600;
+    color: var(--error-color);
+    font-weight: 600;
 }
 
 .fps {
-  background: rgba(255, 255, 255, 0.1);
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.1);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
 }
 
 /* Section de prévisualisation */
 .preview-section {
-  display: flex;
-  justify-content: center;
-  padding: 40px 0;
+    display: flex;
+    justify-content: center;
+    padding: 40px 0;
 }
 
 .preview-container {
-  position: relative;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 20px;
-  border-radius: var(--border-radius);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    position: relative;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 20px;
+    border-radius: var(--border-radius);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
 }
 
 .led-preview {
-  width: 512px;
-  height: 512px;
-  image-rendering: pixelated;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: crisp-edges;
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  display: block;
+    width: 512px;
+    height: 512px;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    display: block;
 }
 
 .preview-overlay {
-  position: absolute;
-  bottom: 10px;
-  right: 10px;
-  background: rgba(0, 0, 0, 0.7);
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  pointer-events: none;
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    pointer-events: none;
 }
 
 /* Section du spectre audio */
 .spectrum-section {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border-radius: var(--border-radius);
-  padding: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .spectrum-section h2 {
-  margin-bottom: 20px;
-  font-size: 1.3rem;
-  font-weight: 600;
+    margin-bottom: 20px;
+    font-size: 1.3rem;
+    font-weight: 600;
 }
 
 .spectrum-bars {
-  display: flex;
-  align-items: flex-end;
-  height: 120px;
-  gap: 2px;
-  background: rgba(0, 0, 0, 0.3);
-  padding: 10px;
-  border-radius: 8px;
-  overflow: hidden;
+    display: flex;
+    align-items: flex-end;
+    height: 120px;
+    gap: 2px;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 10px;
+    border-radius: 8px;
+    overflow: hidden;
 }
 
 .spectrum-bar {
-  flex: 1;
-  min-height: 2px;
-  border-radius: 2px 2px 0 0;
-  transition: height var(--transition-speed) ease-out;
-  will-change: height;
+    flex: 1;
+    min-height: 2px;
+    border-radius: 2px 2px 0 0;
+    transition: height var(--transition-speed) ease-out;
+    will-change: height;
 }
 
 /* Section des effets */
 .effects-section {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border-radius: var(--border-radius);
-  padding: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border-radius: var(--border-radius);
+    padding: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .effects-section h2 {
-  margin-bottom: 20px;
-  font-size: 1.3rem;
-  font-weight: 600;
+    margin-bottom: 20px;
+    font-size: 1.3rem;
+    font-weight: 600;
 }
 
 .effects-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 15px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
 }
 
 .effect-button {
-  background: rgba(255, 255, 255, 0.08);
-  border: 2px solid transparent;
-  padding: 20px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all var(--transition-speed);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-primary);
-  font-size: 0.9rem;
-  position: relative;
-  overflow: hidden;
+    background: rgba(255, 255, 255, 0.08);
+    border: 2px solid transparent;
+    padding: 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all var(--transition-speed);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    position: relative;
+    overflow: hidden;
 }
 
 .effect-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-  transform: translateY(-2px);
-  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
 }
 
 .effect-button.active {
-  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-  border-color: var(--accent-color);
-  box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    border-color: var(--accent-color);
+    box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
 }
 
 .effect-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .effect-icon {
-  font-size: 2rem;
+    font-size: 2rem;
 }
 
 .effect-name {
-  font-weight: 500;
+    font-weight: 500;
 }
 
 /* Section des modes de couleur */
 .color-section {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border-radius: var(--border-radius);
-  padding: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border-radius: var(--border-radius);
+    padding: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .color-section h2 {
-  margin-bottom: 20px;
-  font-size: 1.3rem;
-  font-weight: 600;
+    margin-bottom: 20px;
+    font-size: 1.3rem;
+    font-weight: 600;
 }
 
 .color-modes {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
 }
 
 .color-mode-button {
-  background: rgba(255, 255, 255, 0.08);
-  border: 2px solid transparent;
-  padding: 15px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all var(--transition-speed);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-primary);
-  font-size: 0.85rem;
+    background: rgba(255, 255, 255, 0.08);
+    border: 2px solid transparent;
+    padding: 15px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all var(--transition-speed);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
 }
 
 .color-mode-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-  transform: scale(1.05);
+    background: rgba(255, 255, 255, 0.12);
+    transform: scale(1.05);
 }
 
 .color-mode-button.active {
-  background: rgba(102, 126, 234, 0.3);
-  border-color: var(--primary-color);
+    background: rgba(102, 126, 234, 0.3);
+    border-color: var(--primary-color);
 }
 
 .color-mode-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .mode-icon {
-  font-size: 1.5rem;
+    font-size: 1.5rem;
 }
 
 .mode-name {
-  font-weight: 500;
+    font-weight: 500;
 }
 
 /* Sélecteur de couleur personnalisée */
 .custom-color-picker {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  padding: 15px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 8px;
-  margin-top: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    margin-top: 20px;
 }
 
-.custom-color-picker input[type="color"] {
-  width: 60px;
-  height: 40px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  background: transparent;
+.custom-color-picker input[type='color'] {
+    width: 60px;
+    height: 40px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
 }
 
-.custom-color-picker input[type="color"]::-webkit-color-swatch-wrapper {
-  padding: 0;
+.custom-color-picker input[type='color']::-webkit-color-swatch-wrapper {
+    padding: 0;
 }
 
-.custom-color-picker input[type="color"]::-webkit-color-swatch {
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 6px;
+.custom-color-picker input[type='color']::-webkit-color-swatch {
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 6px;
 }
 
 .custom-color-picker span {
-  font-weight: 500;
-  color: var(--text-secondary);
+    font-weight: 500;
+    color: var(--text-secondary);
 }
 
 /* Responsive design */
 @media (max-width: 768px) {
-  .container {
-    padding: 10px;
-    gap: 20px;
-  }
+    .container {
+        padding: 10px;
+        gap: 20px;
+    }
 
-  .header {
-    flex-direction: column;
-    gap: 15px;
-    padding: 15px;
-  }
+    .header {
+        flex-direction: column;
+        gap: 15px;
+        padding: 15px;
+    }
 
-  .header h1 {
-    font-size: 1.5rem;
-  }
+    .header h1 {
+        font-size: 1.5rem;
+    }
 
-  .led-preview {
-    width: 100%;
-    max-width: 320px;
-    height: auto;
-    aspect-ratio: 1;
-  }
+    .led-preview {
+        width: 100%;
+        max-width: 320px;
+        height: auto;
+        aspect-ratio: 1;
+    }
 
-  .effects-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-  }
+    .effects-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
 
-  .effect-button {
-    padding: 15px;
-  }
+    .effect-button {
+        padding: 15px;
+    }
 
-  .effect-icon {
-    font-size: 1.5rem;
-  }
+    .effect-icon {
+        font-size: 1.5rem;
+    }
 
-  .color-modes {
-    grid-template-columns: repeat(2, 1fr);
-  }
+    .color-modes {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 /* Animations */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .preview-section,
 .spectrum-section,
 .effects-section,
 .color-section {
-  animation: fadeIn 0.6s ease-out forwards;
+    animation: fadeIn 0.6s ease-out forwards;
 }
 
 .preview-section {
-  animation-delay: 0.1s;
+    animation-delay: 0.1s;
 }
 
 .spectrum-section {
-  animation-delay: 0.2s;
+    animation-delay: 0.2s;
 }
 
 .effects-section {
-  animation-delay: 0.3s;
+    animation-delay: 0.3s;
 }
 
 .color-section {
-  animation-delay: 0.4s;
+    animation-delay: 0.4s;
 }
 
 /* Performance optimizations */
 .spectrum-bar,
 .effect-button,
 .color-mode-button {
-  will-change: transform;
+    will-change: transform;
 }
 
 /* Disable animations for reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }
