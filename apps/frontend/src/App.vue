@@ -66,13 +66,7 @@
 import { onMounted, ref, watch } from 'vue';
 
 // Components
-import ColorModesPanel from './components/ColorModesPanel.vue';
-import CustomColorPanel from './components/CustomColorPanel.vue';
-import DataPanel from './components/DataPanel.vue';
-import EffectsPanel from './components/EffectsPanel.vue';
-import Header from './components/Header.vue';
-import QuickActions from './components/QuickActions.vue';
-import Terminal from './components/Terminal.vue';
+import {ColorModesPanel, CustomColorPanel, DataPanel, EffectsPanel, Header, QuickActions, Terminal} from "@monorepo/ui"
 
 // Composables
 import { useColors } from './composables/useColors';
