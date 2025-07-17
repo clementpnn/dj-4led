@@ -756,3 +756,257 @@ fn rand() -> f32 {
         (s as f32) / (u32::MAX as f32)
     })
 }
+
+// Effet 4: Applaudimètre
+pub struct Applaudimetre {
+    current_level: f32,
+    max_level: f32,
+    max_hold_time: f32,
+    smoothed_level: f32,
+    peak_history: Vec<f32>,
+}
+
+impl Applaudimetre {
+    pub fn new() -> Self {
+        Self {
+            current_level: 0.0,
+            max_level: 0.0,
+            max_hold_time: 0.0,
+            smoothed_level: 0.0,
+            peak_history: vec![0.0; 30], // Historique pour moyenner les pics
+        }
+    }
+
+    fn get_color_for_level(&self, level: f32, is_max_indicator: bool) -> (f32, f32, f32) {
+        let color_mode = unsafe { &GLOBAL_COLOR_CONFIG };
+
+        if is_max_indicator {
+            // Couleur spéciale pour l'indicateur de maximum
+            match color_mode.mode.as_str() {
+                "rainbow" => (1.0, 1.0, 1.0), // Blanc pour se démarquer
+                "fire" => (1.0, 1.0, 0.0),    // Jaune brillant
+                "ocean" => (0.0, 1.0, 1.0),   // Cyan brillant
+                "sunset" => (1.0, 0.5, 0.0),  // Orange brillant
+                "custom" => {
+                    let (r, g, b) = color_mode.custom_color;
+                    (r * 1.5, g * 1.5, b * 1.5) // Version plus brillante
+                }
+                _ => (1.0, 1.0, 1.0),
+            }
+        } else {
+            // Couleur dégradée selon le niveau
+            match color_mode.mode.as_str() {
+                "rainbow" => {
+                    // Vert -> Jaune -> Rouge selon le niveau
+                    if level < 0.5 {
+                        let factor = level * 2.0;
+                        (factor, 1.0, 0.0) // Vert vers jaune
+                    } else {
+                        let factor = (level - 0.5) * 2.0;
+                        (1.0, 1.0 - factor, 0.0) // Jaune vers rouge
+                    }
+                }
+                "fire" => {
+                    let hue = (1.0 - level) * 0.15; // Rouge à jaune selon le niveau
+                    hsv_to_rgb(hue, 1.0, level.max(0.3))
+                }
+                "ocean" => {
+                    let hue = 0.5 + level * 0.17; // Cyan vers bleu selon le niveau
+                    hsv_to_rgb(hue, 0.8, level.max(0.3))
+                }
+                "sunset" => {
+                    let hue = 0.1 - level * 0.1; // Orange vers rouge selon le niveau
+                    hsv_to_rgb(hue, 1.0, level.max(0.3))
+                }
+                "custom" => {
+                    let (r, g, b) = color_mode.custom_color;
+                    (r * level.max(0.2), g * level.max(0.2), b * level.max(0.2))
+                }
+                _ => hsv_to_rgb(0.3, 1.0, level.max(0.3)),
+            }
+        }
+    }
+
+    fn calculate_audio_level(&self, spectrum: &[f32]) -> f32 {
+        // Calculer le niveau sonore global avec pondération
+        let bass_weight = 0.4;
+        let mid_weight = 0.4;
+        let high_weight = 0.2;
+
+        let bass_level = spectrum[..8].iter().sum::<f32>() / 8.0;
+        let mid_level = spectrum[8..24].iter().sum::<f32>() / 16.0;
+        let high_level = spectrum[24..].iter().sum::<f32>() / 40.0;
+
+        let weighted_level = bass_level * bass_weight + mid_level * mid_weight + high_level * high_weight;
+
+        // Appliquer une courbe pour rendre plus sensible aux variations
+        weighted_level.powf(0.7)
+    }
+}
+
+impl Effect for Applaudimetre {
+    fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
+        // Calculer le niveau audio actuel
+        let raw_level = self.calculate_audio_level(spectrum);
+
+        // Lissage du niveau pour éviter les fluctuations trop rapides
+        self.smoothed_level = self.smoothed_level * 0.7 + raw_level * 0.3;
+        self.current_level = self.smoothed_level;
+
+        // Mettre à jour l'historique des pics
+        self.peak_history.remove(0);
+        self.peak_history.push(self.current_level);
+
+        // Calculer le niveau maximum récent
+        let recent_max = self.peak_history.iter().cloned().fold(0.0f32, f32::max);
+
+        // Gestion du maximum avec délai de 5 secondes
+        if self.current_level > self.max_level {
+            // Nouveau maximum atteint
+            self.max_level = self.current_level;
+            self.max_hold_time = 0.0;
+        } else {
+            // Incrémenter le temps de maintien (approximation à ~60 FPS)
+            self.max_hold_time += 1.0 / 60.0;
+
+            // Après 5 secondes, permettre au maximum de redescendre
+            if self.max_hold_time >= 5.0 {
+                // Décroissance lente du maximum vers le niveau récent
+                let decay_rate = 0.005;
+                self.max_level = (self.max_level - decay_rate).max(recent_max);
+
+                // Réinitialiser le timer si on atteint le niveau récent
+                if self.max_level <= recent_max {
+                    self.max_hold_time = 0.0;
+                }
+            }
+        }
+
+        // Log de débogage
+        static mut APPLAUD_FRAME_COUNT: u64 = 0;
+        unsafe {
+            APPLAUD_FRAME_COUNT += 1;
+            if APPLAUD_FRAME_COUNT % 30 == 0 && self.current_level > 0.01 {
+                println!(
+                    "👏 [Applaudimètre] Level: {:.3}, Max: {:.3}, Hold: {:.1}s",
+                    self.current_level, self.max_level, self.max_hold_time
+                );
+            }
+        }
+
+        // Effacer l'écran
+        frame.fill(0);
+
+        // Rendu parallèle de la barre
+        frame.par_chunks_mut(3).enumerate().for_each(|(i, pixel)| {
+            let x = i % 128;
+            let y = i / 128;
+
+            // Définir la zone de la barre (centrée, largeur de 40 pixels)
+            let bar_left = 44;
+            let bar_right = 84;
+            let bar_width = bar_right - bar_left;
+
+            if x >= bar_left && x < bar_right {
+                // Position verticale (0.0 = bas, 1.0 = haut)
+                let y_pos = (127 - y) as f32 / 127.0;
+
+                // Hauteur de la barre actuelle
+                let bar_height = self.current_level.min(1.0);
+
+                // Dessiner la barre principale
+                if y_pos <= bar_height {
+                    let level_factor = y_pos / bar_height;
+                    let brightness = 0.8 + level_factor * 0.2;
+                    let (r, g, b) = self.get_color_for_level(level_factor, false);
+
+                    pixel[0] = (r * brightness * 255.0) as u8;
+                    pixel[1] = (g * brightness * 255.0) as u8;
+                    pixel[2] = (b * brightness * 255.0) as u8;
+                }
+
+                // Dessiner l'indicateur de maximum
+                let max_y = (127.0 - self.max_level * 127.0) as usize;
+                if y >= max_y.saturating_sub(1) && y <= max_y.saturating_add(1) && self.max_level > 0.05 {
+                    let (r, g, b) = self.get_color_for_level(self.max_level, true);
+
+                    // Effet de clignotement si le maximum est maintenu
+                    let blink_factor = if self.max_hold_time < 5.0 {
+                        // Clignotement rapide pendant le maintien
+                        0.7 + 0.3 * (self.max_hold_time * 10.0).sin().abs()
+                    } else {
+                        // Clignotement lent pendant la décroissance
+                        0.5 + 0.5 * (self.max_hold_time * 3.0).sin().abs()
+                    };
+
+                    pixel[0] = (r * blink_factor * 255.0) as u8;
+                    pixel[1] = (g * blink_factor * 255.0) as u8;
+                    pixel[2] = (b * blink_factor * 255.0) as u8;
+                }
+
+                // Dessiner les graduations sur les côtés
+                if x == bar_left || x == bar_right - 1 {
+                    // Graduations tous les 12.7 pixels (10 graduations)
+                    for grad in 0..10 {
+                        let grad_y = (127.0 - (grad as f32 * 127.0 / 9.0)) as usize;
+                        if y >= grad_y.saturating_sub(1) && y <= grad_y.saturating_add(1) {
+                            let intensity = if grad == 9 { 0.8 } else { 0.4 }; // Graduation du haut plus visible
+                            pixel[0] = (128.0 * intensity) as u8;
+                            pixel[1] = (128.0 * intensity) as u8;
+                            pixel[2] = (128.0 * intensity) as u8;
+                        }
+                    }
+                }
+            }
+
+            // Dessiner le cadre autour de la barre
+            if ((x == bar_left - 1 || x == bar_right) && y >= 0 && y < 128) ||
+               ((y == 0 || y == 127) && x >= bar_left - 1 && x <= bar_right) {
+                pixel[0] = 64;
+                pixel[1] = 64;
+                pixel[2] = 64;
+            }
+
+            // Afficher le texte "MAX" près de l'indicateur de maximum
+            if self.max_level > 0.1 {
+                let max_y = (127.0 - self.max_level * 127.0) as usize;
+                let text_x = bar_right + 5;
+
+                // Dessiner "MAX" de façon simple (pattern 3x5)
+                if x >= text_x && x < text_x + 15 && y >= max_y.saturating_sub(2) && y <= max_y.saturating_add(2) {
+                    let local_x = x - text_x;
+                    let local_y = y - max_y.saturating_sub(2);
+
+                    // Pattern simple pour "MAX"
+                    let max_pattern = [
+                        [1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1],
+                        [1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
+                        [1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1],
+                        [1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
+                        [1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1],
+                    ];
+
+                    if local_y < 5 && local_x < 15 && max_pattern[local_y][local_x] == 1 {
+                        let (r, g, b) = self.get_color_for_level(self.max_level, true);
+                        pixel[0] = (r * 0.8 * 255.0) as u8;
+                        pixel[1] = (g * 0.8 * 255.0) as u8;
+                        pixel[2] = (b * 0.8 * 255.0) as u8;
+                    }
+                }
+            }
+        });
+    }
+
+    fn set_color_mode(&mut self, mode: &str) {
+        println!("   Applaudimètre: color mode set to '{}'", mode);
+        // Color mode is now set globally
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        println!(
+            "   Applaudimètre: custom color set to ({:.2}, {:.2}, {:.2})",
+            r, g, b
+        );
+        // Custom color is now set globally
+    }
+}
