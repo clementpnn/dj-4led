@@ -27,7 +27,7 @@ import type { Effect } from '../utils/constants';
 
 interface Props {
     effects: Effect[];
-    currentEffect: number | null;
+    currentEffect: number | undefined;
     isConnected: boolean;
     loading: boolean;
 }

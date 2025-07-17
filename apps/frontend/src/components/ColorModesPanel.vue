@@ -27,7 +27,7 @@ import type { ColorMode } from '../utils/constants';
 
 interface Props {
     colorModes: ColorMode[];
-    currentMode: string | null;
+    currentMode: string | undefined;
     isConnected: boolean;
     loading: boolean;
 }

@@ -1,10 +1,6 @@
-<!-- src/App.vue -->
 <template>
   <div class="app">
-    <!-- Header -->
-    <Header :is-connected="connection.isConnected.value" />
-
-    <!-- Main content -->
+    <HeaderComponent :is-connected="connection.isConnected.value" />
     <div class="main-content">
       <!-- Quick actions -->
       <QuickActions
@@ -18,7 +14,6 @@
         @stream="handleStream"
       />
 
-      <!-- Real-time data display -->
       <DataPanel
         v-if="
           streaming.streamData.value.frames.length > 0 ||
@@ -27,9 +22,7 @@
         :stream-data="streaming.streamData.value"
       />
 
-      <!-- Control panels grid -->
       <div class="control-grid">
-        <!-- Effects panel -->
         <EffectsPanel
           :effects="EFFECTS"
           :current-effect="effects.currentEffect.value"
@@ -38,7 +31,6 @@
           @effect-change="handleEffectChange"
         />
 
-        <!-- Color modes panel -->
         <ColorModesPanel
           :color-modes="COLOR_MODES"
           :current-mode="colors.currentMode.value"
@@ -47,7 +39,6 @@
           @mode-change="handleModeChange"
         />
 
-        <!-- Custom color panel -->
         <CustomColorPanel
           :custom-color="colors.customColor.value"
           :color-channels="COLOR_CHANNELS"
@@ -59,7 +50,6 @@
         />
       </div>
 
-      <!-- Console terminal -->
       <Terminal
         :logs="logs.logs.value"
         @clear-logs="logs.clearLogs"
@@ -72,36 +62,32 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
 
-// Components
 import ColorModesPanel from "./components/ColorModesPanel.vue";
 import CustomColorPanel from "./components/CustomColorPanel.vue";
 import DataPanel from "./components/DataPanel.vue";
 import EffectsPanel from "./components/EffectsPanel.vue";
-import Header from "./components/Header.vue";
+import HeaderComponent from "./components/HeaderComponent.vue";
 import QuickActions from "./components/QuickActions.vue";
-import Terminal from "./components/Terminal.vue";
+import TerminalComponent from "./components/TerminalComponent.vue";
 
-// Composables
 import { useColors } from "./composables/useColors";
 import { useConnection } from "./composables/useConnection";
 import { useEffects } from "./composables/useEffects";
 import { useLogs } from "./composables/useLogs";
 import { useStreaming } from "./composables/useStreaming";
 
-// Constants
 import { COLOR_CHANNELS, COLOR_MODES, EFFECTS } from "./utils/constants";
 
-// Composables initialization
 const connection = useConnection();
 const effects = useEffects();
 const colors = useColors();
 const streaming = useStreaming();
 const logs = useLogs();
 
-// Refs
-const terminalRef = ref<InstanceType<typeof Terminal> | null>(null);
+const terminalRef = ref<InstanceType<typeof TerminalComponent> | undefined>(
+  undefined,
+);
 
-// Connection handlers
 const handleConnect = async (): Promise<void> => {
   const result = await connection.connect();
   logs.log(result.message, result.success ? "success" : "error");
@@ -109,7 +95,6 @@ const handleConnect = async (): Promise<void> => {
 
 const handleDisconnect = async (): Promise<void> => {
   const result = await connection.disconnect();
-  // Reset all states when disconnecting
   effects.resetEffect();
   colors.resetColors();
   streaming.clearStreamData();
@@ -128,14 +113,12 @@ const handleStream = async (): Promise<void> => {
   logs.log(result.message, result.success ? "success" : "error");
 };
 
-// Effects handlers
 const handleEffectChange = async (effectId: number): Promise<void> => {
   logs.log(`🎇 Applying effect ${effectId}...`, "info");
   const result = await effects.setEffect(effectId);
   logs.log(result.message, result.success ? "success" : "error");
 };
 
-// Color handlers
 const handleModeChange = async (mode: string): Promise<void> => {
   logs.log(`🌈 Applying mode ${mode}...`, "info");
   const result = await colors.setColorMode(mode);
@@ -160,7 +143,6 @@ const handleColorUpdate = (newColor: {
   colors.customColor.value = newColor;
 };
 
-// Watch for log container changes to enable auto-scroll
 watch(
   () => logs.logs.value.length,
   () => {
@@ -170,10 +152,8 @@ watch(
   },
 );
 
-// Initialize
 onMounted(() => {
   logs.initLogs();
-  // Set the log container reference
   if (terminalRef.value?.logContainer) {
     logs.logContainer.value = terminalRef.value.logContainer;
   }
@@ -181,7 +161,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* Global styles */
 
 *,
 *::before,
@@ -225,21 +204,18 @@ body {
   overflow-x: hidden;
 }
 
-/* Main content */
 .main-content {
   max-width: 1200px;
   margin: 0 auto;
   padding: 2rem;
 }
 
-/* Control grid */
 .control-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
   gap: 1.5rem;
 }
 
-/* Responsive */
 @media (max-width: 768px) {
   .main-content {
     padding: 1rem;
