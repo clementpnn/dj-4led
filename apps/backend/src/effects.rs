@@ -43,9 +43,12 @@ impl EffectEngine {
 
         Self {
             effects: vec![
-                Box::new(SpectrumBars::new()),
-                Box::new(CircularWave::new()),
-                Box::new(ParticleSystem::new()),
+                Box::new(SpectrumBars::new()) as Box<dyn Effect>,
+                Box::new(CircularWave::new()) as Box<dyn Effect>,
+                Box::new(ParticleSystem::new()) as Box<dyn Effect>,
+                Box::new(Applaudimetre::new()) as Box<dyn Effect>,
+                Box::new(Flames::new()) as Box<dyn Effect>,
+                Box::new(Rain::new()) as Box<dyn Effect>,
             ],
             current: 0,
             transition: 0.0,
@@ -723,6 +726,722 @@ impl Effect for ParticleSystem {
     }
 }
 
+// Effet 4: Flammes
+pub struct Flames {
+    // Tableau de hauteurs pour les flammes
+    heights: Vec<f32>,
+    // Chaleur à la base des flammes
+    heat_sources: Vec<f32>,
+    // Facteur de refroidissement
+    cooling_map: Vec<f32>,
+    // Compteur d'animation
+    animation_counter: f32,
+}
+
+impl Flames {
+    pub fn new() -> Self {
+        // Initialiser les hauteurs des flammes à zéro
+        let mut heights = vec![0.0; 128];
+
+        // Initialiser les sources de chaleur
+        let mut heat_sources = vec![0.0; 128];
+
+        // Créer une carte de refroidissement avec des valeurs aléatoires
+        let mut cooling_map = vec![0.0; 128 * 128];
+        for i in 0..cooling_map.len() {
+            cooling_map[i] = rand() * 0.2;
+        }
+
+        Self {
+            heights,
+            heat_sources,
+            cooling_map,
+            animation_counter: 0.0,
+        }
+    }
+
+    fn get_flame_color(&self, temperature: f32, x: usize, y: usize) -> (f32, f32, f32) {
+        let color_mode = unsafe { &GLOBAL_COLOR_CONFIG };
+
+        // Normaliser la température entre 0.0 et 1.0
+        let t = temperature.min(1.0).max(0.0);
+
+        match color_mode.mode.as_str() {
+            // Mode flammes classique (rouge, orange, jaune)
+            "fire" => {
+                if t < 0.2 {
+                    // Noir/rouge très sombre
+                    (t * 5.0 * 0.5, 0.0, 0.0)
+                } else if t < 0.5 {
+                    // Rouge vers orange
+                    (0.5 + (t - 0.2) * 0.5 / 0.3, (t - 0.2) * 0.4 / 0.3, 0.0)
+                } else {
+                    // Orange vers jaune
+                    (1.0, 0.4 + (t - 0.5) * 0.6 / 0.5, (t - 0.5) * 0.2 / 0.5)
+                }
+            },
+            // Mode flammes bleues
+            "ocean" => {
+                if t < 0.2 {
+                    // Noir/bleu très sombre
+                    (0.0, 0.0, t * 5.0 * 0.5)
+                } else if t < 0.5 {
+                    // Bleu vers cyan
+                    (0.0, (t - 0.2) * 0.4 / 0.3, 0.5 + (t - 0.2) * 0.5 / 0.3)
+                } else {
+                    // Cyan vers blanc-bleu
+                    ((t - 0.5) * 0.5 / 0.5, 0.4 + (t - 0.5) * 0.6 / 0.5, 1.0)
+                }
+            },
+            // Mode arc-en-ciel
+            "rainbow" => {
+                let hue = (self.animation_counter * 0.01 + (x as f32 / 128.0) * 0.5) % 1.0;
+                let saturation = 1.0 - t * 0.5; // Moins saturé en haut
+                let value = t;
+                hsv_to_rgb(hue, saturation, value)
+            },
+            // Mode coucher de soleil
+            "sunset" => {
+                if t < 0.33 {
+                    // Violet foncé vers violet
+                    (0.2 + t * 0.3 / 0.33, 0.0, 0.3 + t * 0.3 / 0.33)
+                } else if t < 0.66 {
+                    // Violet vers rouge
+                    (0.5 + (t - 0.33) * 0.5 / 0.33, 0.0, 0.6 - (t - 0.33) * 0.6 / 0.33)
+                } else {
+                    // Rouge vers orange-jaune
+                    (1.0, (t - 0.66) * 0.8 / 0.34, 0.0)
+                }
+            },
+            // Mode couleur personnalisée
+            "custom" => {
+                let (r, g, b) = color_mode.custom_color;
+                (r * t, g * t, b * t)
+            },
+            // Par défaut, flammes classiques
+            _ => {
+                if t < 0.2 {
+                    (t * 5.0 * 0.5, 0.0, 0.0)
+                } else if t < 0.5 {
+                    (0.5 + (t - 0.2) * 0.5 / 0.3, (t - 0.2) * 0.4 / 0.3, 0.0)
+                } else {
+                    (1.0, 0.4 + (t - 0.5) * 0.6 / 0.5, (t - 0.5) * 0.2 / 0.5)
+                }
+            }
+        }
+    }
+}
+
+impl Effect for Flames {
+    fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
+        // Analyser le spectre audio pour influencer les flammes
+        // Augmenter drastiquement la sensibilité en multipliant les valeurs du spectre
+        let sensitivity = 5.0; // Facteur d'amplification du signal audio beaucoup plus élevé
+
+        // Appliquer la sensibilité aux différentes bandes de fréquence
+        let bass_energy = (spectrum[..8].iter().sum::<f32>() / 8.0) * sensitivity;
+        let mid_energy = (spectrum[8..24].iter().sum::<f32>() / 16.0) * sensitivity;
+        let high_energy = (spectrum[24..].iter().sum::<f32>() / 40.0) * sensitivity;
+
+        // Limiter les valeurs entre 0.0 et 1.0
+        let bass_energy = bass_energy.min(1.0);
+        let mid_energy = mid_energy.min(1.0);
+        let high_energy = high_energy.min(1.0);
+
+        // Donner beaucoup plus d'importance aux basses fréquences pour les flammes
+        // Utiliser une fonction non linéaire pour amplifier les petits signaux
+        let bass_contribution = bass_energy.powf(0.5) * 0.7; // Racine carrée pour amplifier les petits signaux
+        let mid_contribution = mid_energy.powf(0.6) * 0.25;
+        let high_contribution = high_energy.powf(0.7) * 0.05;
+
+        // Calculer l'énergie totale avec une amplification supplémentaire
+        let raw_energy = bass_contribution + mid_contribution + high_contribution;
+
+        // Appliquer une courbe de réponse non linéaire pour amplifier même les petits signaux
+        // Cette formule transforme les petites valeurs (0.1-0.3) en valeurs moyennes (0.4-0.6)
+        let total_energy = (raw_energy * 1.5).min(1.0);
+
+        // Log pour déboguer l'intensité sonore
+        if total_energy > 0.01 {
+            println!(
+                "🔥 [Flames] Bass: {:.2}, Mid: {:.2}, High: {:.2}, Total: {:.2}",
+                bass_energy,
+                mid_energy,
+                high_energy,
+                total_energy
+            );
+        }
+
+        // Incrémenter le compteur d'animation
+        self.animation_counter += 0.5 + bass_energy * 2.0;
+
+        // Créer une matrice de température pour simuler les flammes
+        let mut temperature = vec![0.0; 128 * 128];
+
+        // Calculer la hauteur maximale des flammes en fonction de l'intensité sonore
+        // Plus le son est fort, plus les flammes sont hautes
+        // Augmenter drastiquement la réactivité en rendant les flammes plus réactives
+        let min_height = 20.0; // Hauteur minimale des flammes réduite
+        let max_height = 127.0; // Hauteur maximale possible
+
+        // Utiliser une fonction exponentielle pour la hauteur des flammes
+        // Cela rend les flammes beaucoup plus réactives aux changements d'intensité sonore
+        let height_factor = total_energy.powf(0.7); // Exposant < 1 pour amplifier les petits signaux
+        let max_flame_height = min_height + height_factor * (max_height - min_height); // Entre 20 et 127 pixels
+
+        // Mettre à jour les sources de chaleur à la base en fonction du spectre audio
+        for x in 0..128 {
+            // Ajouter de l'aléatoire pour un effet plus naturel
+            let random_factor = 0.7 + rand() * 0.6;
+
+            // Calculer l'énergie en fonction de la position (plus d'énergie au centre)
+            let position_factor = 1.0 - ((x as f32 - 64.0).abs() / 64.0) * 0.5;
+
+            // Combiner l'audio et l'aléatoire
+            let energy = (bass_energy * 1.5 + mid_energy * 0.8 + high_energy * 0.5) * position_factor * random_factor;
+
+            // Mettre à jour la source de chaleur
+            self.heat_sources[x] = (self.heat_sources[x] * 0.8 + energy * 0.2).min(1.0);
+
+            // Appliquer la source de chaleur à la base de la matrice de température
+            let idx = (127 * 128 + x) as usize;
+            temperature[idx] = self.heat_sources[x];
+
+            // Ajouter beaucoup plus d'étincelles quand le son est détecté
+            let base_chance = 0.25; // Chance de base plus élevée
+            let spark_chance = base_chance + total_energy * 0.7; // Entre 0.25 et 0.95 - extrêmement réactif
+
+            // Générer plusieurs étincelles par position
+            let spark_count = (1.0 + total_energy * 3.0) as usize; // Entre 1 et 4 étincelles par position
+
+            if rand() < spark_chance {
+                for _ in 0..spark_count {
+                    // Générer beaucoup plus d'étincelles avec une distribution plus large quand le son est fort
+                    let spread = 15.0 + total_energy * 25.0; // Entre 15 et 40 pixels de dispersion
+                    let spark_x = (x as f32 + (rand() - 0.5) * spread).max(0.0).min(127.0) as usize;
+
+                    // Les étincelles montent beaucoup plus haut quand le son est fort
+                    let height_factor = 0.4 + total_energy * 0.5; // Entre 0.4 et 0.9
+                    let spark_y = (127.0 - rand() * max_flame_height * height_factor) as usize;
+
+                    // Étincelles plus intenses avec le son
+                    let intensity = 0.8 + total_energy * 0.2; // Entre 0.8 et 1.0
+
+                    let spark_idx = spark_y * 128 + spark_x;
+                    if spark_idx < temperature.len() {
+                        temperature[spark_idx] = intensity;
+                    }
+                }
+            }
+        }
+
+        // Simuler la propagation de la chaleur de bas en haut
+        for y in (0..127).rev() {
+            // Calculer un facteur de propagation qui diminue avec la hauteur
+            // et qui est fortement influencé par l'intensité sonore
+            let height_factor = 1.0 - (127.0 - y as f32) / max_flame_height;
+
+            // Propagation plus agressive quand le son est fort
+            let propagation_factor = if height_factor > 0.0 {
+                // Entre 0.88 et 0.98 selon l'intensité sonore - plus réactif
+                0.88 + total_energy * 0.1
+            } else {
+                // Propagation plus forte même au-delà de la hauteur maximale si le son est fort
+                0.5 + total_energy * 0.2 // Entre 0.5 et 0.7
+            };
+
+            // Ajouter des pulsations basées sur l'intensité des basses
+            let bass_pulse = (self.animation_counter * 0.05).sin() * bass_energy * 0.05;
+
+            for x in 0..128 {
+                let idx = y * 128 + x;
+                let idx_below = (y + 1) * 128 + x;
+
+                // Propager la chaleur vers le haut avec diffusion
+                // Ajouter l'effet de pulsation des basses
+                let mut new_temp = temperature[idx_below] * (propagation_factor + bass_pulse);
+
+                // Ajouter de la diffusion latérale
+                if x > 0 {
+                    new_temp += temperature[idx_below - 1] * 0.05;
+                }
+                if x < 127 {
+                    new_temp += temperature[idx_below + 1] * 0.05;
+                }
+
+                // Ajouter un peu de mouvement aléatoire
+                // Plus d'agitation quand le son est fort
+                let wind_strength = 0.02 + total_energy * 0.05;
+                let wind = (self.animation_counter * 0.01).sin() * wind_strength + rand() * wind_strength;
+                let wind_x = (x as i32 + wind.signum() as i32).max(0).min(127) as usize;
+                let wind_idx = (y + 1) * 128 + wind_x;
+                if wind_idx < temperature.len() {
+                    new_temp += temperature[wind_idx] * wind.abs() * 5.0;
+                }
+
+                // Appliquer le refroidissement (beaucoup moins de refroidissement quand le son est détecté)
+                // Utiliser une fonction exponentielle pour réduire drastiquement le refroidissement même avec un son faible
+                let min_cooling_factor = 0.2; // Facteur minimal de refroidissement (20%)
+                let cooling_factor = min_cooling_factor + (1.0 - min_cooling_factor) * (1.0 - total_energy).powf(2.0);
+                let cooling = self.cooling_map[idx] * cooling_factor;
+
+                // Appliquer un plancher minimal de température pour maintenir des flammes visibles même avec un son très faible
+                let min_temp = if y > 100 { 0.1 } else { 0.0 }; // Maintenir un minimum de chaleur à la base
+                temperature[idx] = (new_temp - cooling).max(min_temp);
+            }
+        }
+
+        // Dessiner les flammes
+        for y in 0..128 {
+            for x in 0..128 {
+                let idx = y * 128 + x;
+                let temp = temperature[idx];
+
+                if temp > 0.01 {
+                    let (r, g, b) = self.get_flame_color(temp, x, y);
+                    let frame_idx = idx * 3;
+
+                    frame[frame_idx] = (r * 255.0) as u8;
+                    frame[frame_idx + 1] = (g * 255.0) as u8;
+                    frame[frame_idx + 2] = (b * 255.0) as u8;
+                } else {
+                    // Pixel noir (fond)
+                    let frame_idx = idx * 3;
+                    frame[frame_idx] = 0;
+                    frame[frame_idx + 1] = 0;
+                    frame[frame_idx + 2] = 0;
+                }
+            }
+        }
+    }
+
+    fn set_color_mode(&mut self, mode: &str) {
+        println!("🔥 [Flames] Setting color mode to '{}'", mode);
+        // Le mode de couleur est géré via GLOBAL_COLOR_CONFIG
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        println!(
+            "🔥 [Flames] Setting custom color to ({:.2}, {:.2}, {:.2})",
+            r, g, b
+        );
+        // La couleur personnalisée est gérée via GLOBAL_COLOR_CONFIG
+    }
+}
+
+
+// Effet 5: Pluie
+struct Rain {
+    drops: Vec<RainDrop>,
+    animation_counter: f32,
+    color_mode: String,
+    custom_color: (f32, f32, f32),
+}
+
+struct RainDrop {
+    x: f32,      // Position horizontale
+    y: f32,      // Position verticale
+    length: f32, // Longueur de la goutte
+    speed: f32,  // Vitesse de chute
+    brightness: f32, // Luminosité de la goutte
+}
+
+impl Rain {
+    fn new() -> Self {
+        let mut drops = Vec::with_capacity(100);
+
+        // Initialiser quelques gouttes de pluie
+        for _ in 0..50 {
+            drops.push(RainDrop {
+                x: rand() * 128.0,
+                y: rand() * 128.0,
+                length: 3.0 + rand() * 10.0,
+                speed: 1.0 + rand() * 3.0,
+                brightness: 0.3 + rand() * 0.7,
+            });
+        }
+
+        Self {
+            drops,
+            animation_counter: 0.0,
+            color_mode: "ocean".to_string(), // Mode couleur par défaut pour la pluie
+            custom_color: (0.0, 0.5, 1.0),  // Bleu clair par défaut
+        }
+    }
+
+    fn get_rain_color(&self, brightness: f32, y_pos: f32) -> (f32, f32, f32) {
+        match self.color_mode.as_str() {
+            "custom" => {
+                let (r, g, b) = self.custom_color;
+                (r * brightness, g * brightness, b * brightness)
+            }
+            "rainbow" => {
+                // Couleur arc-en-ciel basée sur la position verticale
+                let hue = (y_pos / 128.0) * 360.0;
+                let (r, g, b) = hsv_to_rgb(hue, 0.7, brightness);
+                (r, g, b)
+            }
+            "fire" => {
+                // Couleur de feu (rouge-orange)
+                let r = brightness;
+                let g = brightness * 0.5;
+                let b = brightness * 0.1;
+                (r, g, b)
+            }
+            "ocean" => {
+                // Dégradé de bleus
+                let r = brightness * 0.1;
+                let g = brightness * 0.5;
+                let b = brightness;
+                (r, g, b)
+            }
+            "sunset" => {
+                // Dégradé coucher de soleil
+                let r = brightness;
+                let g = brightness * 0.6;
+                let b = brightness * 0.8;
+                (r, g, b)
+            }
+            "matrix" => {
+                // Vert style Matrix
+                let r = brightness * 0.1;
+                let g = brightness;
+                let b = brightness * 0.1;
+                (r, g, b)
+            }
+            _ => {
+                // Bleu par défaut
+                let r = brightness * 0.1;
+                let g = brightness * 0.5;
+                let b = brightness;
+                (r, g, b)
+            }
+        }
+    }
+}
+
+impl Effect for Rain {
+    fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
+        // Analyser le spectre audio pour influencer la pluie
+        let bass_energy = spectrum[..8].iter().sum::<f32>() / 8.0;
+        let mid_energy = spectrum[8..24].iter().sum::<f32>() / 16.0;
+        let high_energy = spectrum[24..].iter().sum::<f32>() / 40.0;
+
+        // Amplifier la sensibilité
+        let sensitivity = 4.0;
+        let bass_energy = (bass_energy * sensitivity).min(1.0);
+        let mid_energy = (mid_energy * sensitivity).min(1.0);
+        let high_energy = (high_energy * sensitivity).min(1.0);
+
+        // L'intensité sonore totale influence la quantité et la vitesse des gouttes
+        let total_energy = (bass_energy * 0.5 + mid_energy * 0.3 + high_energy * 0.2).min(1.0);
+
+        // Effacer le frame
+        for pixel in frame.chunks_exact_mut(3) {
+            pixel[0] = 0;
+            pixel[1] = 0;
+            pixel[2] = 0;
+        }
+
+        // Incrémenter le compteur d'animation
+        self.animation_counter += 0.1;
+
+        // Ajouter de nouvelles gouttes en fonction de l'intensité sonore
+        let drop_chance = 0.2 + total_energy * 0.5; // Entre 0.2 et 0.7
+        if rand() < drop_chance {
+            let num_new_drops = (1.0 + total_energy * 5.0) as usize; // Entre 1 et 6 nouvelles gouttes
+
+            for _ in 0..num_new_drops {
+                if self.drops.len() < 200 { // Limiter le nombre total de gouttes
+                    self.drops.push(RainDrop {
+                        x: rand() * 128.0,
+                        y: -10.0 - rand() * 10.0, // Commencer au-dessus de l'écran
+                        length: 3.0 + rand() * 12.0 + total_energy * 10.0, // Longueur influencée par le son
+                        speed: 1.0 + rand() * 2.0 + total_energy * 3.0,   // Vitesse influencée par le son
+                        brightness: 0.3 + rand() * 0.5 + total_energy * 0.2, // Luminosité influencée par le son
+                    });
+                }
+            }
+        }
+
+        // Mettre à jour et dessiner les gouttes de pluie
+        let mut i = 0;
+        while i < self.drops.len() {
+            // CORRECTION : Séparer l'accès mutable et immutable
+            {
+                let drop = &mut self.drops[i];
+                drop.y += drop.speed;
+
+                let wind_effect = (self.animation_counter * 0.05).sin() * mid_energy * 0.5;
+                drop.x += wind_effect;
+
+                if drop.x < 0.0 {
+                    drop.x = 0.0;
+                } else if drop.x >= 128.0 {
+                    drop.x = 127.9;
+                }
+            }
+
+            // CORRECTION : Accès immutable séparé
+            let drop = &self.drops[i];
+            let x = drop.x as usize;
+            let start_y = (drop.y - drop.length).max(0.0) as usize;
+            let end_y = drop.y.min(127.0) as usize;
+
+            // Dessiner la goutte avec un dégradé de luminosité du haut vers le bas
+            for y in start_y..=end_y {
+                if y < 128 {
+                    let relative_pos = (y as f32 - start_y as f32) / (end_y as f32 - start_y as f32 + 1.0);
+                    let brightness_factor = drop.brightness * (0.5 + relative_pos * 0.5);
+
+                    let (r, g, b) = self.get_rain_color(brightness_factor, y as f32);
+
+                    let idx = (y * 128 + x) * 3;
+                    if idx + 2 < frame.len() {
+                        frame[idx] = (r * 255.0) as u8;
+                        frame[idx + 1] = (g * 255.0) as u8;
+                        frame[idx + 2] = (b * 255.0) as u8;
+                    }
+                }
+            }
+
+            // Supprimer les gouttes qui sont sorties de l'écran
+            if drop.y - drop.length > 128.0 {
+                self.drops.swap_remove(i);
+            } else {
+                i += 1;
+            }
+        }
+
+        // Ajouter des éclaboussures au sol quand les gouttes touchent le bas
+        if total_energy > 0.3 {
+            for _i in 0..5 {
+                let splash_x = rand() * 128.0;
+                let splash_y = 127.0 - rand() * 3.0;
+                let splash_size = 1.0 + rand() * 2.0 + total_energy * 3.0;
+
+                for dx in -splash_size as i32..=splash_size as i32 {
+                    let x = (splash_x as i32 + dx).max(0).min(127) as usize;
+                    let y = splash_y as usize;
+
+                    let brightness = (1.0 - (dx.abs() as f32 / splash_size)) * total_energy;
+                    let (r, g, b) = self.get_rain_color(brightness, y as f32);
+
+                    let idx = (y * 128 + x) * 3;
+                    if idx + 2 < frame.len() {
+                        frame[idx] = (r * 255.0) as u8;
+                        frame[idx + 1] = (g * 255.0) as u8;
+                        frame[idx + 2] = (b * 255.0) as u8;
+                    }
+                }
+            }
+        }
+    }
+
+    fn set_color_mode(&mut self, mode: &str) {
+        self.color_mode = mode.to_string();
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        self.custom_color = (r, g, b);
+        self.color_mode = "custom".to_string();
+    }
+}
+
+// Effet 6: Applaudimètre
+pub struct Applaudimetre {
+    current_level: f32,
+    max_level: f32,
+    max_hold_time: f32,
+    smoothed_level: f32,
+    peak_history: Vec<f32>,
+}
+
+impl Applaudimetre {
+    pub fn new() -> Self {
+        Self {
+            current_level: 0.0,
+            max_level: 0.0,
+            max_hold_time: 0.0,
+            smoothed_level: 0.0,
+            peak_history: vec![0.0; 30],
+        }
+    }
+
+    fn get_color_for_level(&self, level: f32, is_max_indicator: bool) -> (f32, f32, f32) {
+        let color_mode = unsafe { &GLOBAL_COLOR_CONFIG };
+
+        if is_max_indicator {
+            match color_mode.mode.as_str() {
+                "rainbow" => (1.0, 1.0, 1.0),
+                "fire" => (1.0, 1.0, 0.0),
+                "ocean" => (0.0, 1.0, 1.0),
+                "sunset" => (1.0, 0.5, 0.0),
+                "custom" => {
+                    let (r, g, b) = color_mode.custom_color;
+                    ((r * 1.5).min(1.0), (g * 1.5).min(1.0), (b * 1.5).min(1.0))
+                }
+                _ => (1.0, 1.0, 1.0),
+            }
+        } else {
+            match color_mode.mode.as_str() {
+                "rainbow" => {
+                    // Vert -> Jaune -> Rouge selon le niveau
+                    if level < 0.5 {
+                        let factor = level * 2.0;
+                        (factor, 1.0, 0.0) // Vert vers jaune
+                    } else {
+                        let factor = (level - 0.5) * 2.0;
+                        (1.0, 1.0 - factor, 0.0) // Jaune vers rouge
+                    }
+                }
+                "fire" => {
+                    let hue = (1.0 - level) * 0.15;
+                    hsv_to_rgb(hue, 1.0, level.max(0.3))
+                }
+                "ocean" => {
+                    let hue = 0.5 + level * 0.17;
+                    hsv_to_rgb(hue, 0.8, level.max(0.3))
+                }
+                "sunset" => {
+                    let hue = 0.1 - level * 0.1;
+                    hsv_to_rgb(hue, 1.0, level.max(0.3))
+                }
+                "custom" => {
+                    let (r, g, b) = color_mode.custom_color;
+                    (r * level.max(0.2), g * level.max(0.2), b * level.max(0.2))
+                }
+                _ => hsv_to_rgb(0.3, 1.0, level.max(0.3)),
+            }
+        }
+    }
+
+    fn calculate_audio_level(&self, spectrum: &[f32]) -> f32 {
+        let bass_weight = 0.4;
+        let mid_weight = 0.4;
+        let high_weight = 0.2;
+
+        let bass_level = spectrum[..8].iter().sum::<f32>() / 8.0;
+        let mid_level = spectrum[8..24].iter().sum::<f32>() / 16.0;
+        let high_level = spectrum[24..].iter().sum::<f32>() / 40.0;
+
+        let weighted_level = bass_level * bass_weight + mid_level * mid_weight + high_level * high_weight;
+        weighted_level.powf(0.7)
+    }
+}
+
+impl Effect for Applaudimetre {
+    fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
+        let raw_level = self.calculate_audio_level(spectrum);
+        self.smoothed_level = self.smoothed_level * 0.7 + raw_level * 0.3;
+        self.current_level = self.smoothed_level;
+
+        if self.peak_history.len() > 0 {
+            self.peak_history.remove(0);
+            self.peak_history.push(self.current_level);
+        }
+
+        let recent_max = self.peak_history.iter().cloned().fold(0.0f32, f32::max);
+
+        if self.current_level > self.max_level {
+            self.max_level = self.current_level;
+            self.max_hold_time = 0.0;
+        } else {
+            self.max_hold_time += 1.0 / 60.0;
+            if self.max_hold_time >= 5.0 {
+                let decay_rate = 0.005;
+                self.max_level = (self.max_level - decay_rate).max(recent_max);
+                if self.max_level <= recent_max {
+                    self.max_hold_time = 0.0;
+                }
+            }
+        }
+
+        static mut APPLAUD_FRAME_COUNT: u64 = 0;
+        unsafe {
+            APPLAUD_FRAME_COUNT += 1;
+            if APPLAUD_FRAME_COUNT % 30 == 0 {
+                println!(
+                    "👏 [Applaudimètre] Level: {:.3}, Max: {:.3}, Hold: {:.1}s",
+                    self.current_level, self.max_level, self.max_hold_time
+                );
+            }
+        }
+
+        frame.fill(0);
+
+        frame.par_chunks_mut(3).enumerate().for_each(|(i, pixel)| {
+            let x = i % 128;
+            let y = i / 128;
+            let bar_left = 44;
+            let bar_right = 84;
+
+            if x >= bar_left && x < bar_right {
+                let y_pos = (127 - y) as f32 / 127.0;
+                let bar_height = self.current_level.min(1.0);
+
+                if y_pos <= bar_height && bar_height > 0.0 {
+                    let level_factor = if bar_height > 0.01 {
+                        y_pos / bar_height
+                    } else {
+                        0.0
+                    };
+                    let brightness = 0.8 + level_factor * 0.2;
+                    let (r, g, b) = self.get_color_for_level(level_factor, false);
+
+                    pixel[0] = (r * brightness * 255.0) as u8;
+                    pixel[1] = (g * brightness * 255.0) as u8;
+                    pixel[2] = (b * brightness * 255.0) as u8;
+                }
+
+                let max_y = (127.0 - self.max_level * 127.0) as usize;
+                if y >= max_y.saturating_sub(1) && y <= max_y.saturating_add(1) && self.max_level > 0.05 {
+                    let (r, g, b) = self.get_color_for_level(self.max_level, true);
+                    let blink_factor = if self.max_hold_time < 5.0 {
+                        0.7 + 0.3 * (self.max_hold_time * 10.0).sin().abs()
+                    } else {
+                        0.5 + 0.5 * (self.max_hold_time * 3.0).sin().abs()
+                    };
+
+                    pixel[0] = (r * blink_factor * 255.0) as u8;
+                    pixel[1] = (g * blink_factor * 255.0) as u8;
+                    pixel[2] = (b * blink_factor * 255.0) as u8;
+                }
+
+                if x == bar_left || x == bar_right - 1 {
+                    for grad in 0..10 {
+                        let grad_y = (127.0 - (grad as f32 * 127.0 / 9.0)) as usize;
+                        if y >= grad_y.saturating_sub(1) && y <= grad_y.saturating_add(1) {
+                            let intensity = if grad == 9 { 0.8 } else { 0.4 };
+                            pixel[0] = (128.0 * intensity) as u8;
+                            pixel[1] = (128.0 * intensity) as u8;
+                            pixel[2] = (128.0 * intensity) as u8;
+                        }
+                    }
+                }
+            }
+
+            if ((x == bar_left - 1 || x == bar_right) && y < 128) ||
+               ((y == 0 || y == 127) && x >= bar_left - 1 && x <= bar_right) {
+                pixel[0] = 64;
+                pixel[1] = 64;
+                pixel[2] = 64;
+            }
+        });
+    }
+
+    fn set_color_mode(&mut self, mode: &str) {
+        println!("   Applaudimètre: color mode set to '{}'", mode);
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        println!(
+            "   Applaudimètre: custom color set to ({:.2}, {:.2}, {:.2})",
+            r, g, b
+        );
+    }
+}
+
 // Helpers
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     let c = v * s;
@@ -755,258 +1474,4 @@ fn rand() -> f32 {
         seed.set(s);
         (s as f32) / (u32::MAX as f32)
     })
-}
-
-// Effet 4: Applaudimètre
-pub struct Applaudimetre {
-    current_level: f32,
-    max_level: f32,
-    max_hold_time: f32,
-    smoothed_level: f32,
-    peak_history: Vec<f32>,
-}
-
-impl Applaudimetre {
-    pub fn new() -> Self {
-        Self {
-            current_level: 0.0,
-            max_level: 0.0,
-            max_hold_time: 0.0,
-            smoothed_level: 0.0,
-            peak_history: vec![0.0; 30], // Historique pour moyenner les pics
-        }
-    }
-
-    fn get_color_for_level(&self, level: f32, is_max_indicator: bool) -> (f32, f32, f32) {
-        let color_mode = unsafe { &GLOBAL_COLOR_CONFIG };
-
-        if is_max_indicator {
-            // Couleur spéciale pour l'indicateur de maximum
-            match color_mode.mode.as_str() {
-                "rainbow" => (1.0, 1.0, 1.0), // Blanc pour se démarquer
-                "fire" => (1.0, 1.0, 0.0),    // Jaune brillant
-                "ocean" => (0.0, 1.0, 1.0),   // Cyan brillant
-                "sunset" => (1.0, 0.5, 0.0),  // Orange brillant
-                "custom" => {
-                    let (r, g, b) = color_mode.custom_color;
-                    (r * 1.5, g * 1.5, b * 1.5) // Version plus brillante
-                }
-                _ => (1.0, 1.0, 1.0),
-            }
-        } else {
-            // Couleur dégradée selon le niveau
-            match color_mode.mode.as_str() {
-                "rainbow" => {
-                    // Vert -> Jaune -> Rouge selon le niveau
-                    if level < 0.5 {
-                        let factor = level * 2.0;
-                        (factor, 1.0, 0.0) // Vert vers jaune
-                    } else {
-                        let factor = (level - 0.5) * 2.0;
-                        (1.0, 1.0 - factor, 0.0) // Jaune vers rouge
-                    }
-                }
-                "fire" => {
-                    let hue = (1.0 - level) * 0.15; // Rouge à jaune selon le niveau
-                    hsv_to_rgb(hue, 1.0, level.max(0.3))
-                }
-                "ocean" => {
-                    let hue = 0.5 + level * 0.17; // Cyan vers bleu selon le niveau
-                    hsv_to_rgb(hue, 0.8, level.max(0.3))
-                }
-                "sunset" => {
-                    let hue = 0.1 - level * 0.1; // Orange vers rouge selon le niveau
-                    hsv_to_rgb(hue, 1.0, level.max(0.3))
-                }
-                "custom" => {
-                    let (r, g, b) = color_mode.custom_color;
-                    (r * level.max(0.2), g * level.max(0.2), b * level.max(0.2))
-                }
-                _ => hsv_to_rgb(0.3, 1.0, level.max(0.3)),
-            }
-        }
-    }
-
-    fn calculate_audio_level(&self, spectrum: &[f32]) -> f32 {
-        // Calculer le niveau sonore global avec pondération
-        let bass_weight = 0.4;
-        let mid_weight = 0.4;
-        let high_weight = 0.2;
-
-        let bass_level = spectrum[..8].iter().sum::<f32>() / 8.0;
-        let mid_level = spectrum[8..24].iter().sum::<f32>() / 16.0;
-        let high_level = spectrum[24..].iter().sum::<f32>() / 40.0;
-
-        let weighted_level = bass_level * bass_weight + mid_level * mid_weight + high_level * high_weight;
-
-        // Appliquer une courbe pour rendre plus sensible aux variations
-        weighted_level.powf(0.7)
-    }
-}
-
-impl Effect for Applaudimetre {
-    fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
-        // Calculer le niveau audio actuel
-        let raw_level = self.calculate_audio_level(spectrum);
-
-        // Lissage du niveau pour éviter les fluctuations trop rapides
-        self.smoothed_level = self.smoothed_level * 0.7 + raw_level * 0.3;
-        self.current_level = self.smoothed_level;
-
-        // Mettre à jour l'historique des pics
-        self.peak_history.remove(0);
-        self.peak_history.push(self.current_level);
-
-        // Calculer le niveau maximum récent
-        let recent_max = self.peak_history.iter().cloned().fold(0.0f32, f32::max);
-
-        // Gestion du maximum avec délai de 5 secondes
-        if self.current_level > self.max_level {
-            // Nouveau maximum atteint
-            self.max_level = self.current_level;
-            self.max_hold_time = 0.0;
-        } else {
-            // Incrémenter le temps de maintien (approximation à ~60 FPS)
-            self.max_hold_time += 1.0 / 60.0;
-
-            // Après 5 secondes, permettre au maximum de redescendre
-            if self.max_hold_time >= 5.0 {
-                // Décroissance lente du maximum vers le niveau récent
-                let decay_rate = 0.005;
-                self.max_level = (self.max_level - decay_rate).max(recent_max);
-
-                // Réinitialiser le timer si on atteint le niveau récent
-                if self.max_level <= recent_max {
-                    self.max_hold_time = 0.0;
-                }
-            }
-        }
-
-        // Log de débogage
-        static mut APPLAUD_FRAME_COUNT: u64 = 0;
-        unsafe {
-            APPLAUD_FRAME_COUNT += 1;
-            if APPLAUD_FRAME_COUNT % 30 == 0 && self.current_level > 0.01 {
-                println!(
-                    "👏 [Applaudimètre] Level: {:.3}, Max: {:.3}, Hold: {:.1}s",
-                    self.current_level, self.max_level, self.max_hold_time
-                );
-            }
-        }
-
-        // Effacer l'écran
-        frame.fill(0);
-
-        // Rendu parallèle de la barre
-        frame.par_chunks_mut(3).enumerate().for_each(|(i, pixel)| {
-            let x = i % 128;
-            let y = i / 128;
-
-            // Définir la zone de la barre (centrée, largeur de 40 pixels)
-            let bar_left = 44;
-            let bar_right = 84;
-            let bar_width = bar_right - bar_left;
-
-            if x >= bar_left && x < bar_right {
-                // Position verticale (0.0 = bas, 1.0 = haut)
-                let y_pos = (127 - y) as f32 / 127.0;
-
-                // Hauteur de la barre actuelle
-                let bar_height = self.current_level.min(1.0);
-
-                // Dessiner la barre principale
-                if y_pos <= bar_height {
-                    let level_factor = y_pos / bar_height;
-                    let brightness = 0.8 + level_factor * 0.2;
-                    let (r, g, b) = self.get_color_for_level(level_factor, false);
-
-                    pixel[0] = (r * brightness * 255.0) as u8;
-                    pixel[1] = (g * brightness * 255.0) as u8;
-                    pixel[2] = (b * brightness * 255.0) as u8;
-                }
-
-                // Dessiner l'indicateur de maximum
-                let max_y = (127.0 - self.max_level * 127.0) as usize;
-                if y >= max_y.saturating_sub(1) && y <= max_y.saturating_add(1) && self.max_level > 0.05 {
-                    let (r, g, b) = self.get_color_for_level(self.max_level, true);
-
-                    // Effet de clignotement si le maximum est maintenu
-                    let blink_factor = if self.max_hold_time < 5.0 {
-                        // Clignotement rapide pendant le maintien
-                        0.7 + 0.3 * (self.max_hold_time * 10.0).sin().abs()
-                    } else {
-                        // Clignotement lent pendant la décroissance
-                        0.5 + 0.5 * (self.max_hold_time * 3.0).sin().abs()
-                    };
-
-                    pixel[0] = (r * blink_factor * 255.0) as u8;
-                    pixel[1] = (g * blink_factor * 255.0) as u8;
-                    pixel[2] = (b * blink_factor * 255.0) as u8;
-                }
-
-                // Dessiner les graduations sur les côtés
-                if x == bar_left || x == bar_right - 1 {
-                    // Graduations tous les 12.7 pixels (10 graduations)
-                    for grad in 0..10 {
-                        let grad_y = (127.0 - (grad as f32 * 127.0 / 9.0)) as usize;
-                        if y >= grad_y.saturating_sub(1) && y <= grad_y.saturating_add(1) {
-                            let intensity = if grad == 9 { 0.8 } else { 0.4 }; // Graduation du haut plus visible
-                            pixel[0] = (128.0 * intensity) as u8;
-                            pixel[1] = (128.0 * intensity) as u8;
-                            pixel[2] = (128.0 * intensity) as u8;
-                        }
-                    }
-                }
-            }
-
-            // Dessiner le cadre autour de la barre
-            if ((x == bar_left - 1 || x == bar_right) && y >= 0 && y < 128) ||
-               ((y == 0 || y == 127) && x >= bar_left - 1 && x <= bar_right) {
-                pixel[0] = 64;
-                pixel[1] = 64;
-                pixel[2] = 64;
-            }
-
-            // Afficher le texte "MAX" près de l'indicateur de maximum
-            if self.max_level > 0.1 {
-                let max_y = (127.0 - self.max_level * 127.0) as usize;
-                let text_x = bar_right + 5;
-
-                // Dessiner "MAX" de façon simple (pattern 3x5)
-                if x >= text_x && x < text_x + 15 && y >= max_y.saturating_sub(2) && y <= max_y.saturating_add(2) {
-                    let local_x = x - text_x;
-                    let local_y = y - max_y.saturating_sub(2);
-
-                    // Pattern simple pour "MAX"
-                    let max_pattern = [
-                        [1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1],
-                        [1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
-                        [1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1],
-                        [1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
-                        [1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1],
-                    ];
-
-                    if local_y < 5 && local_x < 15 && max_pattern[local_y][local_x] == 1 {
-                        let (r, g, b) = self.get_color_for_level(self.max_level, true);
-                        pixel[0] = (r * 0.8 * 255.0) as u8;
-                        pixel[1] = (g * 0.8 * 255.0) as u8;
-                        pixel[2] = (b * 0.8 * 255.0) as u8;
-                    }
-                }
-            }
-        });
-    }
-
-    fn set_color_mode(&mut self, mode: &str) {
-        println!("   Applaudimètre: color mode set to '{}'", mode);
-        // Color mode is now set globally
-    }
-
-    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
-        println!(
-            "   Applaudimètre: custom color set to ({:.2}, {:.2}, {:.2})",
-            r, g, b
-        );
-        // Custom color is now set globally
-    }
 }
