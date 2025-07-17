@@ -12,8 +12,8 @@
     "lint:fix": "eslint ../../apps/frontend/src ../../packages/ui/src --ext .ts,.tsx,.vue --fix",
     "format": "prettier --check ../../apps/frontend/src ../../packages/ui/src",
     "format:fix": "prettier --write ../../apps/frontend/src ../../packages/ui/src",
-    "type-check": "vue-tsc --noEmit --project ../../apps/frontend/tsconfig.app.json && vue-tsc --noEmit --project ../../packages/ui/tsconfig.json",
-    "type-check:watch": "vue-tsc --noEmit --watch --project ../../apps/frontend/tsconfig.app.json"
+    "type-check": "cd ../../apps/frontend && vue-tsc --noEmit --project tsconfig.app.json && cd ../../packages/ui && vue-tsc --noEmit --project tsconfig.json",
+    "type-check:watch": "cd ../../apps/frontend && vue-tsc --noEmit --watch --project tsconfig.app.json"
   },
   "devDependencies": {
     "@monorepo/typescript-config": "workspace:*",
