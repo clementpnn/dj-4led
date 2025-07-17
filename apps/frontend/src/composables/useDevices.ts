@@ -112,6 +112,31 @@ export function useDevices() {
         }
     };
 
+    // New diagnosis function for network troubleshooting
+    const diagnosisDevice = async (deviceId: string): Promise<DeviceResult> => {
+        const device = devices.value.find(d => d.id === deviceId);
+        if (!device) {
+            return { success: false, message: "Device not found" };
+        }
+
+        try {
+            const serverAddress = `${device.ipAddress}:${device.port}`;
+            const result = await invoke<string>('dj_diagnose_network', { serverAddress });
+            
+            return {
+                success: true,
+                message: result,
+                device
+            };
+        } catch (error) {
+            return {
+                success: false,
+                message: `❌ Diagnosis error: ${error}`,
+                device
+            };
+        }
+    };
+
     const disconnectDevice = async (deviceId: string): Promise<DeviceResult> => {
         const device = devices.value.find(d => d.id === deviceId);
         if (!device) {
@@ -349,6 +374,7 @@ export function useDevices() {
         connectDevice,
         disconnectDevice,
         pingDevice,
+        diagnosisDevice,
         
         // Control operations
         setDeviceEffect,
