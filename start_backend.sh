@@ -44,18 +44,49 @@ else
     MODE_ARGS="--production --test"
 fi
 
-# Trouver le dossier backend
-if [ -d "apps/backend" ]; then
-    BACKEND_DIR="apps/backend"
-elif [ -d "backend" ]; then
-    BACKEND_DIR="backend"
+# Déterminer le répertoire de travail selon la structure
+if [ -f "Cargo.toml" ]; then
+    # On est déjà dans la racine du projet
+    WORK_DIR="."
+    echo -e "${CYAN}📂 Projet Rust détecté à la racine${NC}"
+elif [ -d "apps/backend" ] && [ -f "apps/backend/Cargo.toml" ]; then
+    # Structure avec apps/backend
+    WORK_DIR="apps/backend"
+    echo -e "${CYAN}📂 Backend: apps/backend${NC}"
+elif [ -d "backend" ] && [ -f "backend/Cargo.toml" ]; then
+    # Structure avec backend
+    WORK_DIR="backend"
+    echo -e "${CYAN}📂 Backend: backend${NC}"
 else
-    echo -e "${RED}❌ Dossier backend introuvable${NC}"
+    echo -e "${RED}❌ Aucun Cargo.toml trouvé${NC}"
+    echo -e "${YELLOW}💡 Vérifiez que vous êtes dans le bon répertoire${NC}"
     exit 1
 fi
 
-cd "$BACKEND_DIR"
-echo -e "${CYAN}📂 Backend: $BACKEND_DIR${NC}"
+cd "$WORK_DIR"
+
+# Vérifier que c'est le bon projet
+if ! grep -q "led-visualizer\|DJ-4LED\|led_visualizer" Cargo.toml 2>/dev/null; then
+    echo -e "${YELLOW}⚠️  Le Cargo.toml ne semble pas correspondre au projet led-visualizer${NC}"
+fi
+
+# Afficher des infos de debug
+echo -e "${CYAN}🔍 Debug info:${NC}"
+echo "   Répertoire: $(pwd)"
+echo "   Cargo.toml: $([ -f Cargo.toml ] && echo "✅" || echo "❌")"
+echo "   src/: $([ -d src ] && echo "✅" || echo "❌")"
+
+# Déterminer le nom du binaire depuis Cargo.toml
+BINARY_NAME="led-visualizer"
+if [ -f "Cargo.toml" ]; then
+    # Essayer de lire le nom du binaire depuis Cargo.toml
+    TOML_NAME=$(grep -E "^name\s*=" Cargo.toml | head -1 | sed 's/.*=\s*"\([^"]*\)".*/\1/' | tr '-' '_')
+    if [ ! -z "$TOML_NAME" ]; then
+        BINARY_NAME="$TOML_NAME"
+    fi
+fi
+
+echo "   Binaire attendu: target/release/$BINARY_NAME"
 
 # Compilation
 echo -e "${CYAN}🔨 Compilation...${NC}"
@@ -66,12 +97,33 @@ if [ "$FORCE_BUILD" = true ]; then
     cargo clean
 fi
 
-# Compiler si nécessaire
-if [ "$FORCE_BUILD" = true ] || [ ! -f "target/release/led-visualizer" ] || [ "src/main.rs" -nt "target/release/led-visualizer" ]; then
+# Déterminer si on doit compiler
+SHOULD_BUILD=false
+
+if [ "$FORCE_BUILD" = true ]; then
+    SHOULD_BUILD=true
+    echo "   Raison: build forcé"
+elif [ ! -f "target/release/$BINARY_NAME" ]; then
+    SHOULD_BUILD=true
+    echo "   Raison: binaire manquant"
+elif [ "Cargo.toml" -nt "target/release/$BINARY_NAME" ]; then
+    SHOULD_BUILD=true
+    echo "   Raison: Cargo.toml modifié"
+elif [ -d src ] && [ "$(find src -name "*.rs" -newer "target/release/$BINARY_NAME" | head -1)" ]; then
+    SHOULD_BUILD=true
+    echo "   Raison: sources modifiées"
+fi
+
+if [ "$SHOULD_BUILD" = true ]; then
     echo "   Building..."
-    cargo build --release
-    if [ $? -ne 0 ]; then
+
+    # Compilation avec output détaillé en cas d'erreur
+    if ! cargo build --release; then
         echo -e "${RED}❌ Erreur compilation${NC}"
+        echo -e "${YELLOW}💡 Suggestions:${NC}"
+        echo "   • Vérifiez les erreurs Rust ci-dessus"
+        echo "   • Tentez: cargo check"
+        echo "   • Ou: cargo build --release --verbose"
         exit 1
     fi
     echo -e "${GREEN}✅ Compilé${NC}"
@@ -79,11 +131,18 @@ else
     echo -e "${GREEN}✅ Déjà compilé${NC}"
 fi
 
+# Vérifier que le binaire existe maintenant
+if [ ! -f "target/release/$BINARY_NAME" ]; then
+    echo -e "${RED}❌ Binaire non trouvé après compilation: target/release/$BINARY_NAME${NC}"
+    echo -e "${YELLOW}💡 Vérifiez le nom dans Cargo.toml${NC}"
+    exit 1
+fi
+
 # Copier config si elle existe
-for config in "../config.vivid.toml" "../../config.vivid.toml"; do
+for config in "../config.vivid.toml" "../../config.vivid.toml" "config.vivid.toml"; do
     if [ -f "$config" ]; then
         cp "$config" config.toml
-        echo -e "${GREEN}✅ Config appliquée${NC}"
+        echo -e "${GREEN}✅ Config appliquée: $config${NC}"
         break
     fi
 done
@@ -107,18 +166,20 @@ echo -e "${CYAN}🎵 Démarrage backend...${NC}"
 echo -e "${CYAN}🔌 WebSocket: ws://localhost:8080${NC}"
 echo ""
 
-./target/release/led-visualizer $MODE_ARGS &
+./target/release/$BINARY_NAME $MODE_ARGS &
 BACKEND_PID=$!
 
 # Vérifier le démarrage
 sleep 2
 if ! kill -0 $BACKEND_PID 2>/dev/null; then
     echo -e "${RED}❌ Échec démarrage${NC}"
+    echo -e "${YELLOW}💡 Vérifiez les logs ci-dessus${NC}"
     exit 1
 fi
 
 echo -e "${GREEN}✅ Backend démarré !${NC}"
 echo "PID: $BACKEND_PID"
+echo "Binaire: ./target/release/$BINARY_NAME"
 echo "Ctrl+C pour arrêter"
 echo ""
 
