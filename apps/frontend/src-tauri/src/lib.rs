@@ -21,8 +21,8 @@ const SET_EFFECT: u8 = 0x01;
 const SET_COLOR_MODE: u8 = 0x02;
 const SET_CUSTOM_COLOR: u8 = 0x03;
 
-// Server configuration
-const SERVER_ADDRESS: &str = "127.0.0.1:8081";
+// Default server configuration
+const DEFAULT_SERVER_ADDRESS: &str = "127.0.0.1:8081";
 
 // Global connection state
 type ConnectionState = Arc<Mutex<Option<UdpSocket>>>;
@@ -58,13 +58,14 @@ fn get_timestamp() -> u32 {
 }
 
 #[tauri::command]
-async fn dj_connect(connection: State<'_, ConnectionState>) -> Result<String, String> {
+async fn dj_connect(server_address: Option<String>, connection: State<'_, ConnectionState>) -> Result<String, String> {
     let socket = create_socket_with_timeout(3)?;
+    let address = server_address.unwrap_or_else(|| DEFAULT_SERVER_ADDRESS.to_string());
 
     // Packet Connect selon la doc
     let connect_packet = create_packet(CONNECT, 0x00, 0, vec![]);
 
-    socket.send_to(&connect_packet, SERVER_ADDRESS)
+    socket.send_to(&connect_packet, &address)
         .map_err(|e| format!("Connection failed: {}", e))?;
 
     // Attendre ACK
@@ -75,7 +76,7 @@ async fn dj_connect(connection: State<'_, ConnectionState>) -> Result<String, St
                 if let Ok(mut conn) = connection.lock() {
                     *conn = Some(socket);
                 }
-                Ok(format!("✅ Connected to DJ-4LED server ({})", addr))
+                Ok(format!("✅ Connected to DJ-4LED server {} ({})", address, addr))
             } else {
                 Ok(format!("⚠️ Unexpected response: type {:#04x}", buf[0]))
             }
@@ -91,13 +92,14 @@ async fn dj_connect(connection: State<'_, ConnectionState>) -> Result<String, St
 }
 
 #[tauri::command]
-async fn dj_disconnect(connection: State<'_, ConnectionState>) -> Result<String, String> {
+async fn dj_disconnect(server_address: Option<String>, connection: State<'_, ConnectionState>) -> Result<String, String> {
     let socket = create_socket_with_timeout(2)?;
+    let address = server_address.unwrap_or_else(|| DEFAULT_SERVER_ADDRESS.to_string());
 
     // Packet Disconnect selon la doc
     let disconnect_packet = create_packet(DISCONNECT, 0x00, get_timestamp(), vec![]);
 
-    socket.send_to(&disconnect_packet, SERVER_ADDRESS)
+    socket.send_to(&disconnect_packet, &address)
         .map_err(|e| format!("Disconnection failed: {}", e))?;
 
     if let Ok(mut conn) = connection.lock() {
@@ -124,12 +126,13 @@ async fn dj_disconnect(connection: State<'_, ConnectionState>) -> Result<String,
 }
 
 #[tauri::command]
-async fn dj_ping() -> Result<String, String> {
+async fn dj_ping(server_address: Option<String>) -> Result<String, String> {
     let socket = create_socket_with_timeout(3)?;
+    let address = server_address.unwrap_or_else(|| DEFAULT_SERVER_ADDRESS.to_string());
 
     let ping_packet = create_packet(PING, 0x00, get_timestamp(), vec![]);
 
-    socket.send_to(&ping_packet, SERVER_ADDRESS)
+    socket.send_to(&ping_packet, &address)
         .map_err(|e| format!("Ping failed: {}", e))?;
 
     let mut buf = [0; 1024];
@@ -152,38 +155,41 @@ async fn dj_ping() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn dj_set_effect(effect_id: u32) -> Result<String, String> {
+async fn dj_set_effect(server_address: Option<String>, effect_id: u32) -> Result<String, String> {
     let socket = create_socket_with_timeout(2)?;
+    let address = server_address.unwrap_or_else(|| DEFAULT_SERVER_ADDRESS.to_string());
 
     let mut payload = vec![SET_EFFECT];
     payload.extend_from_slice(&effect_id.to_le_bytes());
 
     let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
 
-    socket.send_to(&packet, SERVER_ADDRESS)
+    socket.send_to(&packet, &address)
         .map_err(|e| format!("Effect command failed: {}", e))?;
 
     Ok(format!("✅ Effect {} applied", effect_id))
 }
 
 #[tauri::command]
-async fn dj_set_color_mode(mode: String) -> Result<String, String> {
+async fn dj_set_color_mode(server_address: Option<String>, mode: String) -> Result<String, String> {
     let socket = create_socket_with_timeout(2)?;
+    let address = server_address.unwrap_or_else(|| DEFAULT_SERVER_ADDRESS.to_string());
 
     let mut payload = vec![SET_COLOR_MODE];
     payload.extend_from_slice(mode.as_bytes());
 
     let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
 
-    socket.send_to(&packet, SERVER_ADDRESS)
+    socket.send_to(&packet, &address)
         .map_err(|e| format!("Color mode command failed: {}", e))?;
 
     Ok(format!("✅ Color mode '{}' applied", mode))
 }
 
 #[tauri::command]
-async fn dj_set_custom_color(r: f32, g: f32, b: f32) -> Result<String, String> {
+async fn dj_set_custom_color(server_address: Option<String>, r: f32, g: f32, b: f32) -> Result<String, String> {
     let socket = create_socket_with_timeout(2)?;
+    let address = server_address.unwrap_or_else(|| DEFAULT_SERVER_ADDRESS.to_string());
 
     let mut payload = vec![SET_CUSTOM_COLOR];
     payload.extend_from_slice(&r.to_le_bytes());
@@ -192,18 +198,19 @@ async fn dj_set_custom_color(r: f32, g: f32, b: f32) -> Result<String, String> {
 
     let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
 
-    socket.send_to(&packet, SERVER_ADDRESS)
+    socket.send_to(&packet, &address)
         .map_err(|e| format!("Custom color command failed: {}", e))?;
 
     Ok(format!("✅ Color RGB({:.3}, {:.3}, {:.3}) applied", r, g, b))
 }
 
 #[tauri::command]
-async fn dj_listen_data(window: Window) -> Result<String, String> {
+async fn dj_listen_data(server_address: Option<String>, window: Window) -> Result<String, String> {
     let socket = create_socket_with_timeout(8)?;
+    let address = server_address.unwrap_or_else(|| DEFAULT_SERVER_ADDRESS.to_string());
 
     let connect_packet = create_packet(CONNECT, 0x01, 0, vec![]);
-    socket.send_to(&connect_packet, SERVER_ADDRESS)
+    socket.send_to(&connect_packet, &address)
         .map_err(|e| format!("Stream connection failed: {}", e))?;
 
     let mut buf = [0; 2048];
@@ -292,8 +299,9 @@ async fn dj_listen_data(window: Window) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn dj_get_server_info() -> Result<String, String> {
-    Ok(format!("🖥️ DJ-4LED Server: {}", SERVER_ADDRESS))
+async fn dj_get_server_info(server_address: Option<String>) -> Result<String, String> {
+    let address = server_address.unwrap_or_else(|| DEFAULT_SERVER_ADDRESS.to_string());
+    Ok(format!("🖥️ DJ-4LED Server: {}", address))
 }
 
 #[tauri::command]

@@ -65,3 +65,32 @@ export interface StreamResult {
     success: boolean;
     message: string;
 }
+
+// Device/Valise management types
+export interface Device {
+    id: string;
+    name: string;
+    ipAddress: string;
+    port: number;
+    isConnected: boolean;
+    isConnecting: boolean;
+    lastPing?: number;
+    lastSeen?: Date;
+    currentEffect?: number;
+    currentColorMode?: string;
+    customColor?: CustomColor;
+}
+
+export interface DeviceResult {
+    success: boolean;
+    message: string;
+    device?: Device;
+}
+
+export interface DeviceGridSettings {
+    columns: number;
+    itemMinWidth: number;
+    itemMaxWidth: number;
+    gap: number;
+    isResizable: boolean;
+}
