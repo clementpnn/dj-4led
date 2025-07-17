@@ -4,13 +4,24 @@
   "description": "",
   "main": "index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "concurrently \"pnpm run dev:frontend\" \"pnpm run dev:backend\"",
+    "dev:frontend": "pnpm --filter @monorepo/shared run dev",
+    "dev:backend": "pnpm --filter @monorepo/shared run backend",
+    "build": "pnpm --filter @monorepo/shared run build",
+    "preview": "pnpm --filter @monorepo/shared run preview",
+    "lint": "pnpm --filter @monorepo/shared run lint",
+    "lint:fix": "pnpm --filter @monorepo/shared run lint:fix",
+    "format": "pnpm --filter @monorepo/shared run format",
+    "format:fix": "pnpm --filter @monorepo/shared run format:fix",
+    "type-check": "pnpm --filter @monorepo/shared run type-check",
+    "type-check:watch": "pnpm --filter @monorepo/shared run type-check:watch"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.13.1",
   "devDependencies": {
+    "concurrently": "^8.2.2",
     "eslint": "^8.56.0"
   }
 }
