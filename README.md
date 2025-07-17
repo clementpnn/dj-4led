@@ -1,7 +1,3 @@
-<div align="center">
-  <img alt="DJ-4LED Logo" src="./assets/logo.png" width="120">
-</div>
-
 <h1 align="center">DJ-4LED</h1>
 <p align="center">
   Visualiseur LED Audio Temps Réel
