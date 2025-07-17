@@ -293,6 +293,12 @@ impl UdpServer {
                 println!("🎛️  Parameter change: {} = {}", name, value);
                 // Traiter d'autres paramètres si nécessaire
             }
+
+            UdpCommand::UpdateControllers(controllers) => {
+                println!("🔧 Updating LED controllers: {:?}", controllers);
+                let mut led_controller = self.state.led_controller.lock();
+                led_controller.update_controllers(controllers);
+            }
         }
     }
 }

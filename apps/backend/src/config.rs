@@ -59,12 +59,7 @@ impl Default for Config {
                 noise_floor: 0.01,
             },
             led: LedConfig {
-                controllers: vec![
-                    "192.168.1.45:6454".to_string(),
-                    "192.168.1.46:6454".to_string(),
-                    "192.168.1.47:6454".to_string(),
-                    "192.168.1.48:6454".to_string(),
-                ],
+                controllers: vec![], // No default controllers - will be configured from frontend
                 fps: 60,
                 brightness: 1.0,
                 gamma_correction: 2.2,
@@ -138,13 +133,8 @@ impl Config {
                 noise_floor: 0.02,
             },
             led: LedConfig {
-                controllers: vec![
-                    "192.168.1.45:6454".to_string(),
-                    "192.168.1.46:6454".to_string(),
-                    "192.168.1.47:6454".to_string(),
-                    "192.168.1.48:6454".to_string(),
-                ],
-                fps: 50, // Lower FPS for stability
+                controllers: vec![], // No default controllers - will be configured from frontend
+                fps: 50,             // Lower FPS for stability
                 brightness: 0.9,
                 gamma_correction: 2.2,
                 color_temperature: 1.0,
@@ -177,13 +167,8 @@ impl Config {
                 noise_floor: 0.03,
             },
             led: LedConfig {
-                controllers: vec![
-                    "192.168.1.45:6454".to_string(),
-                    "192.168.1.46:6454".to_string(),
-                    "192.168.1.47:6454".to_string(),
-                    "192.168.1.48:6454".to_string(),
-                ],
-                fps: 30, // Lower FPS for performance
+                controllers: vec![], // No default controllers - will be configured from frontend
+                fps: 30,             // Lower FPS for performance
                 brightness: 0.8,
                 gamma_correction: 2.0,
                 color_temperature: 1.0,

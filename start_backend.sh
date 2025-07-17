@@ -34,6 +34,18 @@ else
     MODE_ARGS="--production --test"
 fi
 
+# Vérifier si le port UDP est déjà utilisé
+echo -e "${CYAN}🔍 Vérification du port UDP 8081...${NC}"
+if lsof -i :8081 > /dev/null 2>&1; then
+    echo -e "${RED}❌ Le port UDP 8081 est déjà utilisé${NC}"
+    echo "Processus utilisant le port:"
+    lsof -i :8081
+    echo ""
+    echo "Arrêtez le processus existant avec: kill \$(lsof -t -i :8081)"
+    exit 1
+fi
+echo -e "${GREEN}✅ Port UDP 8081 disponible${NC}"
+
 # Trouver le dossier backend
 if [ -d "apps/backend" ]; then
     BACKEND_DIR="apps/backend"
@@ -85,7 +97,7 @@ trap cleanup INT TERM
 # Démarrer le backend
 echo ""
 echo -e "${CYAN}🎵 Démarrage du backend...${NC}"
-echo -e "${CYAN}🔌 WebSocket sur :${NC} ws://localhost:8080"
+echo -e "${CYAN}🔌 Serveur UDP sur :${NC} udp://0.0.0.0:8081"
 echo ""
 
 ./target/release/led-visualizer $MODE_ARGS &
@@ -102,7 +114,7 @@ echo -e "${GREEN}✅ Backend démarré avec succès !${NC}"
 echo ""
 echo "========================================"
 echo -e "${YELLOW}💡 Informations :${NC}"
-echo "   • WebSocket : ws://localhost:8080"
+echo "   • Serveur UDP : udp://0.0.0.0:8081"
 echo "   • Mode : $MODE_ARGS"
 echo "   • PID : $BACKEND_PID"
 echo ""

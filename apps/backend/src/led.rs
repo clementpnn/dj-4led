@@ -20,21 +20,8 @@ impl LedController {
     pub fn new_with_mode(mode: LedMode) -> Result<Self> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
 
-        // Adresses des contrôleurs LED
-        let controllers = match mode {
-            LedMode::Simulator => vec![
-                "127.0.0.1:6454".to_string(),
-                "127.0.0.1:6454".to_string(),
-                "127.0.0.1:6454".to_string(),
-                "127.0.0.1:6454".to_string(),
-            ],
-            LedMode::Production => vec![
-                "192.168.1.45:6454".to_string(),
-                "192.168.1.46:6454".to_string(),
-                "192.168.1.47:6454".to_string(),
-                "192.168.1.48:6454".to_string(),
-            ],
-        };
+        // Start with no controllers - they will be configured dynamically
+        let controllers = Vec::new();
 
         Ok(Self {
             socket,
@@ -43,7 +30,21 @@ impl LedController {
         })
     }
 
+    pub fn update_controllers(&mut self, controllers: Vec<String>) {
+        println!("📡 Updating LED controllers: {:?}", controllers);
+        self.controllers = controllers;
+    }
+
+    pub fn has_controllers(&self) -> bool {
+        !self.controllers.is_empty()
+    }
+
     pub fn send_frame(&mut self, frame: &[u8]) {
+        // Skip if no controllers configured
+        if self.controllers.is_empty() {
+            return;
+        }
+
         // Calculer la luminosité moyenne pour vérifier si on envoie bien des données
         let avg_brightness =
             frame.iter().map(|&b| b as u32).sum::<u32>() as f32 / frame.len() as f32;
@@ -58,6 +59,11 @@ impl LedController {
     }
 
     fn send_frame_simulator(&mut self, frame: &[u8]) {
+        // Skip if no controllers configured
+        if self.controllers.is_empty() {
+            return;
+        }
+
         // Le simulateur s'attend à recevoir 256 univers (2 par colonne, 128 colonnes)
         let mut universe = 0;
 
@@ -137,17 +143,42 @@ impl LedController {
         // L'écran physique a 64 bandes de 259 LEDs chacune
         // Chaque bande monte puis redescend, formant 2 colonnes
         // Donc 64 bandes = 128 colonnes au total
-        // Organisées en 4 contrôleurs de 16 bandes chacun
+
+        // Vérifier qu'on a au moins un contrôleur configuré
+        if self.controllers.is_empty() {
+            // Pas encore configuré par le frontend
+            return;
+        }
 
         let mut packets_sent = 0;
+        let num_controllers = self.controllers.len();
+        let bands_per_controller = 64 / num_controllers;
+        let extra_bands = 64 % num_controllers;
 
-        for quarter in 0..4 {
-            let controller_ip = &self.controllers[quarter];
-            let base_universe = quarter * 32;
+        for controller_idx in 0..num_controllers {
+            let controller_ip = &self.controllers[controller_idx];
 
-            // Chaque quartier a 16 bandes physiques
-            for band_in_quarter in 0..16 {
-                let physical_band = quarter * 16 + band_in_quarter;
+            // Calculer le nombre de bandes pour ce contrôleur
+            let bands_for_this_controller = if controller_idx < extra_bands {
+                bands_per_controller + 1
+            } else {
+                bands_per_controller
+            };
+
+            // Calculer la bande de départ
+            let start_band = if controller_idx < extra_bands {
+                controller_idx * (bands_per_controller + 1)
+            } else {
+                extra_bands * (bands_per_controller + 1)
+                    + (controller_idx - extra_bands) * bands_per_controller
+            };
+
+            // Calculer l'univers de base pour ce contrôleur
+            let base_universe = start_band * 2;
+
+            // Traiter chaque bande de ce contrôleur
+            for band_offset in 0..bands_for_this_controller {
+                let physical_band = start_band + band_offset;
 
                 // Colonnes correspondantes dans l'écran virtuel
                 let col_up = physical_band * 2; // Colonne montante
@@ -155,7 +186,7 @@ impl LedController {
 
                 // Chaque bande physique utilise 2 univers (259 LEDs / 170 par univers)
                 for uni_in_band in 0..2 {
-                    let universe = base_universe + band_in_quarter * 2 + uni_in_band;
+                    let universe = base_universe + band_offset * 2 + uni_in_band;
                     let mut artnet_packet = self.create_artnet_header(universe);
                     let mut dmx_data = vec![0u8; 512];
 
@@ -172,8 +203,11 @@ impl LedController {
             }
         }
 
-        if packets_sent > 0 && packets_sent % 64 == 0 {
-            println!("✅ Sent {} ArtNet packets", packets_sent);
+        if packets_sent > 0 && packets_sent % 128 == 0 {
+            println!(
+                "✅ Sent {} ArtNet packets to {} controllers",
+                packets_sent, num_controllers
+            );
         }
     }
 

@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    front_lib::run()
+    dj_4led_frontend_lib::run()
 }

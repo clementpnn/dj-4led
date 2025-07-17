@@ -21,6 +21,7 @@ pub struct AppState {
     pub spectrum: Mutex<Vec<f32>>,
     pub effect_engine: Mutex<EffectEngine>,
     pub led_frame: Mutex<Vec<u8>>,
+    pub led_controller: Mutex<LedController>,
 }
 
 fn main() -> Result<()> {
@@ -39,11 +40,19 @@ fn main() -> Result<()> {
     }
 
     // État partagé entre threads
+    let mode = if production_mode {
+        LedMode::Production
+    } else {
+        LedMode::Simulator
+    };
+
+    let led_controller = LedController::new_with_mode(mode).expect("Failed to init LED controller");
 
     let state = Arc::new(AppState {
         spectrum: Mutex::new(vec![0.0; 64]),
         effect_engine: Mutex::new(EffectEngine::new()),
-        led_frame: Mutex::new(vec![0; 128 * 128 * 3]),
+        led_frame: Mutex::new(vec![0u8; 128 * 128 * 3]),
+        led_controller: Mutex::new(led_controller),
     });
 
     // Thread audio (temps réel)
@@ -99,12 +108,6 @@ fn main() -> Result<()> {
     let led_state = state.clone();
     let production = production_mode;
     std::thread::spawn(move || {
-        let mode = if production {
-            LedMode::Production
-        } else {
-            LedMode::Simulator
-        };
-        let mut led = LedController::new_with_mode(mode).expect("Failed to init LED");
         println!(
             "🌐 Contrôleur LED démarré en mode {}",
             if production {
@@ -114,12 +117,13 @@ fn main() -> Result<()> {
             }
         );
 
-        let mut frame_count = 0u64;
+        let mut frame_count = 0;
+        let mut last_log = std::time::Instant::now();
         let start_time = std::time::Instant::now();
 
         loop {
             let frame = led_state.led_frame.lock().clone();
-            led.send_frame(&frame);
+            led_state.led_controller.lock().send_frame(&frame);
 
             frame_count += 1;
             if frame_count % 100 == 0 {

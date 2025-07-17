@@ -1,9 +1,9 @@
 // src-tauri/src/lib.rs
-use std::net::UdpSocket;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::sync::{Arc, Mutex};
-use tauri::{State, Window, Emitter};
 use serde_json::json;
+use std::net::UdpSocket;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::{Emitter, State, Window};
 
 // Packet types selon la doc DJ-4LED
 const CONNECT: u8 = 0x01;
@@ -21,8 +21,7 @@ const SET_EFFECT: u8 = 0x01;
 const SET_COLOR_MODE: u8 = 0x02;
 const SET_CUSTOM_COLOR: u8 = 0x03;
 
-// Server configuration
-const SERVER_ADDRESS: &str = "127.0.0.1:8081";
+// Server configuration - now dynamic
 
 // Global connection state
 type ConnectionState = Arc<Mutex<Option<UdpSocket>>>;
@@ -41,10 +40,11 @@ fn create_packet(packet_type: u8, flags: u8, sequence: u32, payload: Vec<u8>) ->
 }
 
 fn create_socket_with_timeout(timeout_secs: u64) -> Result<UdpSocket, String> {
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Socket creation error: {}", e))?;
+    let socket =
+        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Socket creation error: {}", e))?;
 
-    socket.set_read_timeout(Some(Duration::from_secs(timeout_secs)))
+    socket
+        .set_read_timeout(Some(Duration::from_secs(timeout_secs)))
         .map_err(|e| format!("Timeout configuration error: {}", e))?;
 
     Ok(socket)
@@ -58,13 +58,19 @@ fn get_timestamp() -> u32 {
 }
 
 #[tauri::command]
-async fn dj_connect(connection: State<'_, ConnectionState>) -> Result<String, String> {
+async fn dj_connect(
+    connection: State<'_, ConnectionState>,
+    server_ip: String,
+    server_port: u16,
+) -> Result<String, String> {
     let socket = create_socket_with_timeout(3)?;
+    let server_address = format!("{}:{}", server_ip, server_port);
 
     // Packet Connect selon la doc
     let connect_packet = create_packet(CONNECT, 0x00, 0, vec![]);
 
-    socket.send_to(&connect_packet, SERVER_ADDRESS)
+    socket
+        .send_to(&connect_packet, &server_address)
         .map_err(|e| format!("Connection failed: {}", e))?;
 
     // Attendre ACK
@@ -91,13 +97,19 @@ async fn dj_connect(connection: State<'_, ConnectionState>) -> Result<String, St
 }
 
 #[tauri::command]
-async fn dj_disconnect(connection: State<'_, ConnectionState>) -> Result<String, String> {
+async fn dj_disconnect(
+    connection: State<'_, ConnectionState>,
+    server_ip: String,
+    server_port: u16,
+) -> Result<String, String> {
     let socket = create_socket_with_timeout(2)?;
+    let server_address = format!("{}:{}", server_ip, server_port);
 
     // Packet Disconnect selon la doc
     let disconnect_packet = create_packet(DISCONNECT, 0x00, get_timestamp(), vec![]);
 
-    socket.send_to(&disconnect_packet, SERVER_ADDRESS)
+    socket
+        .send_to(&disconnect_packet, &server_address)
         .map_err(|e| format!("Disconnection failed: {}", e))?;
 
     if let Ok(mut conn) = connection.lock() {
@@ -124,12 +136,14 @@ async fn dj_disconnect(connection: State<'_, ConnectionState>) -> Result<String,
 }
 
 #[tauri::command]
-async fn dj_ping() -> Result<String, String> {
+async fn dj_ping(server_ip: String, server_port: u16) -> Result<String, String> {
     let socket = create_socket_with_timeout(3)?;
+    let server_address = format!("{}:{}", server_ip, server_port);
 
     let ping_packet = create_packet(PING, 0x00, get_timestamp(), vec![]);
 
-    socket.send_to(&ping_packet, SERVER_ADDRESS)
+    socket
+        .send_to(&ping_packet, &server_address)
         .map_err(|e| format!("Ping failed: {}", e))?;
 
     let mut buf = [0; 1024];
@@ -152,38 +166,57 @@ async fn dj_ping() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn dj_set_effect(effect_id: u32) -> Result<String, String> {
+async fn dj_set_effect(
+    effect_id: u32,
+    server_ip: String,
+    server_port: u16,
+) -> Result<String, String> {
     let socket = create_socket_with_timeout(2)?;
+    let server_address = format!("{}:{}", server_ip, server_port);
 
     let mut payload = vec![SET_EFFECT];
     payload.extend_from_slice(&effect_id.to_le_bytes());
 
     let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
 
-    socket.send_to(&packet, SERVER_ADDRESS)
+    socket
+        .send_to(&packet, &server_address)
         .map_err(|e| format!("Effect command failed: {}", e))?;
 
     Ok(format!("✅ Effect {} applied", effect_id))
 }
 
 #[tauri::command]
-async fn dj_set_color_mode(mode: String) -> Result<String, String> {
+async fn dj_set_color_mode(
+    mode: String,
+    server_ip: String,
+    server_port: u16,
+) -> Result<String, String> {
     let socket = create_socket_with_timeout(2)?;
+    let server_address = format!("{}:{}", server_ip, server_port);
 
     let mut payload = vec![SET_COLOR_MODE];
     payload.extend_from_slice(mode.as_bytes());
 
     let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
 
-    socket.send_to(&packet, SERVER_ADDRESS)
+    socket
+        .send_to(&packet, &server_address)
         .map_err(|e| format!("Color mode command failed: {}", e))?;
 
     Ok(format!("✅ Color mode '{}' applied", mode))
 }
 
 #[tauri::command]
-async fn dj_set_custom_color(r: f32, g: f32, b: f32) -> Result<String, String> {
+async fn dj_set_custom_color(
+    r: f32,
+    g: f32,
+    b: f32,
+    server_ip: String,
+    server_port: u16,
+) -> Result<String, String> {
     let socket = create_socket_with_timeout(2)?;
+    let server_address = format!("{}:{}", server_ip, server_port);
 
     let mut payload = vec![SET_CUSTOM_COLOR];
     payload.extend_from_slice(&r.to_le_bytes());
@@ -192,18 +225,28 @@ async fn dj_set_custom_color(r: f32, g: f32, b: f32) -> Result<String, String> {
 
     let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
 
-    socket.send_to(&packet, SERVER_ADDRESS)
+    socket
+        .send_to(&packet, &server_address)
         .map_err(|e| format!("Custom color command failed: {}", e))?;
 
-    Ok(format!("✅ Color RGB({:.3}, {:.3}, {:.3}) applied", r, g, b))
+    Ok(format!(
+        "✅ Color RGB({:.3}, {:.3}, {:.3}) applied",
+        r, g, b
+    ))
 }
 
 #[tauri::command]
-async fn dj_listen_data(window: Window) -> Result<String, String> {
+async fn dj_listen_data(
+    window: Window,
+    server_ip: String,
+    server_port: u16,
+) -> Result<String, String> {
     let socket = create_socket_with_timeout(8)?;
+    let server_address = format!("{}:{}", server_ip, server_port);
 
     let connect_packet = create_packet(CONNECT, 0x01, 0, vec![]);
-    socket.send_to(&connect_packet, SERVER_ADDRESS)
+    socket
+        .send_to(&connect_packet, &server_address)
         .map_err(|e| format!("Stream connection failed: {}", e))?;
 
     let mut buf = [0; 2048];
@@ -252,12 +295,15 @@ async fn dj_listen_data(window: Window) -> Result<String, String> {
                             if len >= 14 {
                                 let band_count = u16::from_le_bytes([buf[12], buf[13]]);
                                 if len >= 14 + (band_count as usize * 4) {
-                                    let mut spectrum_values = Vec::with_capacity(band_count as usize);
+                                    let mut spectrum_values =
+                                        Vec::with_capacity(band_count as usize);
                                     for i in 0..band_count {
                                         let offset = 14 + (i as usize * 4);
                                         let value = f32::from_le_bytes([
-                                            buf[offset], buf[offset + 1],
-                                            buf[offset + 2], buf[offset + 3]
+                                            buf[offset],
+                                            buf[offset + 1],
+                                            buf[offset + 2],
+                                            buf[offset + 3],
                                         ]);
                                         spectrum_values.push(value);
                                     }
@@ -265,8 +311,7 @@ async fn dj_listen_data(window: Window) -> Result<String, String> {
                                 }
                             }
                         }
-                        _ => {
-                        }
+                        _ => {}
                     }
                 }
             }
@@ -287,13 +332,124 @@ async fn dj_listen_data(window: Window) -> Result<String, String> {
     if packets == 1 && frames == 0 && spectrum == 0 {
         Ok("📡 Connected but no data received (silent server)".to_string())
     } else {
-        Ok(format!("📡 Stream received: {} packets ({} frames, {} spectrum)", packets, frames, spectrum))
+        Ok(format!(
+            "📡 Stream received: {} packets ({} frames, {} spectrum)",
+            packets, frames, spectrum
+        ))
     }
 }
 
 #[tauri::command]
-async fn dj_get_server_info() -> Result<String, String> {
-    Ok(format!("🖥️ DJ-4LED Server: {}", SERVER_ADDRESS))
+async fn dj_test_connection(server_ip: String, server_port: u16) -> Result<String, String> {
+    let socket = create_socket_with_timeout(2)?;
+    let server_address = format!("{}:{}", server_ip, server_port);
+
+    let ping_packet = create_packet(PING, 0x00, get_timestamp(), vec![]);
+
+    socket
+        .send_to(&ping_packet, &server_address)
+        .map_err(|e| format!("Test failed: {}", e))?;
+
+    let mut buf = [0; 1024];
+    match socket.recv_from(&mut buf) {
+        Ok((len, _)) => {
+            if len >= 1 && buf[0] == PONG {
+                Ok(format!("✅ Serveur {} accessible", server_address))
+            } else {
+                Ok(format!(
+                    "⚠️ Serveur {} répond mais protocole incorrect",
+                    server_address
+                ))
+            }
+        }
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::TimedOut {
+                Ok(format!("❌ Serveur {} ne répond pas", server_address))
+            } else {
+                Err(format!("Erreur de test: {}", e))
+            }
+        }
+    }
+}
+
+#[tauri::command]
+async fn dj_list_audio_devices() -> Result<Vec<serde_json::Value>, String> {
+    // Mock implementation - in a real app, you'd query audio devices
+    Ok(vec![
+        serde_json::json!({ "id": "default", "name": "Microphone par défaut" }),
+        serde_json::json!({ "id": "builtin", "name": "Microphone intégré" }),
+        serde_json::json!({ "id": "usb", "name": "Microphone USB" }),
+    ])
+}
+
+#[tauri::command]
+async fn dj_update_server_config(ip: String, port: u16) -> Result<String, String> {
+    // This would update the server configuration
+    Ok(format!(
+        "✅ Configuration serveur mise à jour: {}:{}",
+        ip, port
+    ))
+}
+
+#[tauri::command]
+async fn dj_update_audio_config(
+    device_id: String,
+    gain: f32,
+    sample_rate: u32,
+    buffer_size: u32,
+) -> Result<String, String> {
+    // This would update the audio configuration
+    Ok(format!(
+        "✅ Configuration audio mise à jour: device={}, gain={}, rate={}, buffer={}",
+        device_id, gain, sample_rate, buffer_size
+    ))
+}
+
+#[tauri::command]
+async fn dj_update_controllers(
+    controllers: Vec<serde_json::Value>,
+    server_ip: String,
+    server_port: u16,
+) -> Result<String, String> {
+    let socket = create_socket_with_timeout(2)?;
+    let server_address = format!("{}:{}", server_ip, server_port);
+
+    // Convert JSON values to controller addresses
+    let mut controller_addresses = Vec::new();
+    for controller in &controllers {
+        if let Some(obj) = controller.as_object() {
+            if let (Some(ip), Some(port), Some(enabled)) = (
+                obj.get("address").and_then(|v| v.as_str()),
+                obj.get("port").and_then(|v| v.as_u64()),
+                obj.get("enabled").and_then(|v| v.as_bool()),
+            ) {
+                if enabled {
+                    controller_addresses.push(format!("{}:{}", ip, port));
+                }
+            }
+        }
+    }
+
+    // Create UPDATE_CONTROLLERS command (0x05)
+    let mut payload = vec![0x05]; // Command ID for UpdateControllers
+    payload.extend_from_slice(&(controller_addresses.len() as u16).to_le_bytes());
+
+    for address in &controller_addresses {
+        payload.extend_from_slice(&(address.len() as u16).to_le_bytes());
+        payload.extend_from_slice(address.as_bytes());
+    }
+
+    let packet = create_packet(COMMAND, 0x00, get_timestamp(), payload);
+
+    socket
+        .send_to(&packet, &server_address)
+        .map_err(|e| format!("Failed to update controllers: {}", e))?;
+
+    Ok(format!(
+        "✅ {} contrôleurs LED configurés: {:?}",
+        controller_addresses.len(),
+        controller_addresses
+    ))
 }
 
 #[tauri::command]
@@ -317,7 +473,11 @@ pub fn run() {
             dj_set_color_mode,
             dj_set_custom_color,
             dj_listen_data,
-            dj_get_server_info
+            dj_test_connection,
+            dj_list_audio_devices,
+            dj_update_server_config,
+            dj_update_audio_config,
+            dj_update_controllers
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

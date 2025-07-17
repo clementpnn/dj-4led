@@ -184,6 +184,7 @@ pub enum UdpCommand {
     SetColorMode(String),
     SetCustomColor(f32, f32, f32),
     SetParameter(String, String),
+    UpdateControllers(Vec<String>),
 }
 
 impl UdpCommand {
@@ -212,6 +213,15 @@ impl UdpCommand {
                 data.extend_from_slice(name.as_bytes());
                 data.extend_from_slice(&(value.len() as u16).to_le_bytes());
                 data.extend_from_slice(value.as_bytes());
+                data
+            }
+            Self::UpdateControllers(controllers) => {
+                let mut data = vec![0x05]; // Command ID
+                data.extend_from_slice(&(controllers.len() as u16).to_le_bytes());
+                for controller in controllers {
+                    data.extend_from_slice(&(controller.len() as u16).to_le_bytes());
+                    data.extend_from_slice(controller.as_bytes());
+                }
                 data
             }
         }
@@ -267,6 +277,25 @@ impl UdpCommand {
                 let value = String::from_utf8(value_bytes).ok()?;
 
                 Some(Self::SetParameter(name, value))
+            }
+            0x05 => {
+                let mut count_bytes = [0u8; 2];
+                cursor.read_exact(&mut count_bytes).ok()?;
+                let count = u16::from_le_bytes(count_bytes) as usize;
+
+                let mut controllers = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let mut len_bytes = [0u8; 2];
+                    cursor.read_exact(&mut len_bytes).ok()?;
+                    let len = u16::from_le_bytes(len_bytes) as usize;
+
+                    let mut controller_bytes = vec![0u8; len];
+                    cursor.read_exact(&mut controller_bytes).ok()?;
+                    let controller = String::from_utf8(controller_bytes).ok()?;
+                    controllers.push(controller);
+                }
+
+                Some(Self::UpdateControllers(controllers))
             }
             _ => None,
         }
