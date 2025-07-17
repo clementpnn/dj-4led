@@ -49,6 +49,8 @@ impl EffectEngine {
                 Box::new(Applaudimetre::new()) as Box<dyn Effect>,
                 Box::new(Flames::new()) as Box<dyn Effect>,
                 Box::new(Rain::new()) as Box<dyn Effect>,
+                Box::new(Starfall::new()) as Box<dyn Effect>,
+                Box::new(Heartbeat::new()) as Box<dyn Effect>,
             ],
             current: 0,
             transition: 0.0,
@@ -1255,6 +1257,22 @@ pub struct Applaudimetre {
     max_hold_time: f32,
     smoothed_level: f32,
     peak_history: Vec<f32>,
+    // Nouveaux champs pour les améliorations
+    animation_time: f32,
+    level_history: Vec<f32>,          // Historique pour les effets de traînée
+    peak_sparkles: Vec<PeakSparkle>,  // Étincelles autour du pic
+    sensitivity: f32,                 // Sensibilité ajustable
+    auto_gain: f32,                   // Gain automatique adaptatif
+    background_pulse: f32,            // Pulsation de fond
+}
+
+// Structure pour les étincelles autour du pic
+struct PeakSparkle {
+    x: f32,
+    y: f32,
+    life: f32,
+    brightness: f32,
+    color: (f32, f32, f32),
 }
 
 impl Applaudimetre {
@@ -1265,6 +1283,12 @@ impl Applaudimetre {
             max_hold_time: 0.0,
             smoothed_level: 0.0,
             peak_history: vec![0.0; 30],
+            animation_time: 0.0,
+            level_history: vec![0.0; 128],  // Historique de 128 frames
+            peak_sparkles: Vec::new(),
+            sensitivity: 3.0,              // Sensibilité de base augmentée
+            auto_gain: 1.0,                // Gain adaptatif initial
+            background_pulse: 0.0,
         }
     }
 
@@ -1272,70 +1296,160 @@ impl Applaudimetre {
         let color_mode = unsafe { &GLOBAL_COLOR_CONFIG };
 
         if is_max_indicator {
+            // Couleurs plus brillantes et contrastées pour l'indicateur de maximum
             match color_mode.mode.as_str() {
-                "rainbow" => (1.0, 1.0, 1.0),
-                "fire" => (1.0, 1.0, 0.0),
-                "ocean" => (0.0, 1.0, 1.0),
-                "sunset" => (1.0, 0.5, 0.0),
+                "rainbow" => {
+                    // Arc-en-ciel animé pour le maximum
+                    let hue = (self.animation_time * 0.02) % 1.0;
+                    let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
+                    (r, g, b)
+                }
+                "fire" => (1.0, 1.0, 0.2),    // Jaune-blanc brillant
+                "ocean" => (0.2, 1.0, 1.0),   // Cyan-blanc brillant
+                "sunset" => (1.0, 0.6, 0.1),  // Orange brillant
                 "custom" => {
                     let (r, g, b) = color_mode.custom_color;
-                    ((r * 1.5).min(1.0), (g * 1.5).min(1.0), (b * 1.5).min(1.0))
+                    ((r * 1.8).min(1.0), (g * 1.8).min(1.0), (b * 1.8).min(1.0))
                 }
                 _ => (1.0, 1.0, 1.0),
             }
         } else {
+            // Couleurs améliorées pour la barre principale avec plus de contraste
             match color_mode.mode.as_str() {
                 "rainbow" => {
-                    // Vert -> Jaune -> Rouge selon le niveau
-                    if level < 0.5 {
-                        let factor = level * 2.0;
-                        (factor, 1.0, 0.0) // Vert vers jaune
+                    // Dégradé plus dynamique : Bleu -> Vert -> Jaune -> Rouge
+                    if level < 0.25 {
+                        // Bleu vers cyan
+                        let t = level * 4.0;
+                        (0.0, t * 0.5, 1.0)
+                    } else if level < 0.5 {
+                        // Cyan vers vert
+                        let t = (level - 0.25) * 4.0;
+                        (0.0, 0.5 + t * 0.5, 1.0 - t)
+                    } else if level < 0.75 {
+                        // Vert vers jaune
+                        let t = (level - 0.5) * 4.0;
+                        (t, 1.0, 0.0)
                     } else {
-                        let factor = (level - 0.5) * 2.0;
-                        (1.0, 1.0 - factor, 0.0) // Jaune vers rouge
+                        // Jaune vers rouge
+                        let t = (level - 0.75) * 4.0;
+                        (1.0, 1.0 - t, 0.0)
                     }
                 }
                 "fire" => {
-                    let hue = (1.0 - level) * 0.15;
-                    hsv_to_rgb(hue, 1.0, level.max(0.3))
+                    // Flammes plus réalistes
+                    if level < 0.3 {
+                        let t = level / 0.3;
+                        (t * 0.8, 0.0, 0.0)  // Rouge sombre
+                    } else if level < 0.6 {
+                        let t = (level - 0.3) / 0.3;
+                        (0.8 + t * 0.2, t * 0.4, 0.0)  // Rouge vers orange
+                    } else {
+                        let t = (level - 0.6) / 0.4;
+                        (1.0, 0.4 + t * 0.6, t * 0.3)  // Orange vers jaune
+                    }
                 }
                 "ocean" => {
-                    let hue = 0.5 + level * 0.17;
-                    hsv_to_rgb(hue, 0.8, level.max(0.3))
+                    // Océan plus profond
+                    if level < 0.5 {
+                        let t = level * 2.0;
+                        (0.0, t * 0.3, 0.4 + t * 0.4)  // Bleu profond vers bleu
+                    } else {
+                        let t = (level - 0.5) * 2.0;
+                        (t * 0.2, 0.3 + t * 0.5, 0.8 + t * 0.2)  // Bleu vers cyan
+                    }
                 }
                 "sunset" => {
-                    let hue = 0.1 - level * 0.1;
-                    hsv_to_rgb(hue, 1.0, level.max(0.3))
+                    // Coucher de soleil plus dramatique
+                    if level < 0.4 {
+                        let t = level / 0.4;
+                        (0.3 + t * 0.4, 0.1 * t, 0.5 + t * 0.3)  // Violet vers rouge
+                    } else {
+                        let t = (level - 0.4) / 0.6;
+                        (0.7 + t * 0.3, 0.1 + t * 0.7, 0.8 - t * 0.8)  // Rouge vers orange
+                    }
                 }
                 "custom" => {
                     let (r, g, b) = color_mode.custom_color;
-                    (r * level.max(0.2), g * level.max(0.2), b * level.max(0.2))
+                    let intensity = level.max(0.1);
+                    (r * intensity, g * intensity, b * intensity)
                 }
                 _ => hsv_to_rgb(0.3, 1.0, level.max(0.3)),
             }
         }
     }
 
-    fn calculate_audio_level(&self, spectrum: &[f32]) -> f32 {
-        let bass_weight = 0.4;
-        let mid_weight = 0.4;
-        let high_weight = 0.2;
+    fn calculate_audio_level(&mut self, spectrum: &[f32]) -> f32 {
+        // Amélioration de la sensibilité avec adaptation automatique
+        let bass_weight = 0.5;  // Plus d'importance aux basses
+        let mid_weight = 0.35;
+        let high_weight = 0.15;
 
         let bass_level = spectrum[..8].iter().sum::<f32>() / 8.0;
         let mid_level = spectrum[8..24].iter().sum::<f32>() / 16.0;
         let high_level = spectrum[24..].iter().sum::<f32>() / 40.0;
 
-        let weighted_level = bass_level * bass_weight + mid_level * mid_weight + high_level * high_weight;
-        weighted_level.powf(0.7)
+        // Appliquer la sensibilité
+        let raw_level = (bass_level * bass_weight + mid_level * mid_weight + high_level * high_weight) * self.sensitivity;
+
+        // Gain adaptatif automatique
+        if raw_level > 0.01 {
+            // Ajuster le gain automatique selon le niveau moyen
+            let avg_recent = self.peak_history.iter().sum::<f32>() / self.peak_history.len() as f32;
+            if avg_recent < 0.2 {
+                self.auto_gain = (self.auto_gain + 0.01).min(2.0);  // Augmenter le gain si trop faible
+            } else if avg_recent > 0.8 {
+                self.auto_gain = (self.auto_gain - 0.01).max(0.5);  // Diminuer le gain si trop fort
+            }
+        }
+
+        // Appliquer le gain adaptatif et une courbe de réponse
+        let final_level = (raw_level * self.auto_gain).powf(0.6);  // Courbe pour amplifier les petits signaux
+        final_level.min(1.0)
+    }
+
+    fn update_sparkles(&mut self) {
+        // Mettre à jour les étincelles existantes
+        self.peak_sparkles.retain_mut(|sparkle| {
+            sparkle.life -= 0.03;
+            sparkle.y -= 0.5;  // Les étincelles montent
+            sparkle.x += (rand() - 0.5) * 0.3;  // Légère dérive horizontale
+            sparkle.life > 0.0
+        });
+
+        // Ajouter de nouvelles étincelles si le niveau est élevé
+        if self.current_level > 0.3 && rand() < 0.4 {
+            let bar_center = 64.0;
+            let max_y = 127.0 - self.max_level * 127.0;
+
+            for _ in 0..(1 + (self.current_level * 3.0) as usize) {
+                self.peak_sparkles.push(PeakSparkle {
+                    x: bar_center + (rand() - 0.5) * 50.0,
+                    y: max_y + (rand() - 0.5) * 10.0,
+                    life: 0.5 + rand() * 0.5,
+                    brightness: 0.6 + rand() * 0.4,
+                    color: self.get_color_for_level(self.current_level, false),
+                });
+            }
+        }
     }
 }
 
 impl Effect for Applaudimetre {
     fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
+        // Calculer le niveau audio avec les améliorations
         let raw_level = self.calculate_audio_level(spectrum);
-        self.smoothed_level = self.smoothed_level * 0.7 + raw_level * 0.3;
+
+        // Lissage adaptatif plus sophistiqué
+        let smoothing = if raw_level > self.smoothed_level { 0.4 } else { 0.85 };
+        self.smoothed_level = self.smoothed_level * smoothing + raw_level * (1.0 - smoothing);
         self.current_level = self.smoothed_level;
 
+        // Mettre à jour l'historique des niveaux pour les effets de traînée
+        self.level_history.remove(0);
+        self.level_history.push(self.current_level);
+
+        // Gestion du pic améliorée
         if self.peak_history.len() > 0 {
             self.peak_history.remove(0);
             self.peak_history.push(self.current_level);
@@ -1349,7 +1463,7 @@ impl Effect for Applaudimetre {
         } else {
             self.max_hold_time += 1.0 / 60.0;
             if self.max_hold_time >= 5.0 {
-                let decay_rate = 0.005;
+                let decay_rate = 0.008;  // Décroissance légèrement plus rapide
                 self.max_level = (self.max_level - decay_rate).max(recent_max);
                 if self.max_level <= recent_max {
                     self.max_hold_time = 0.0;
@@ -1357,13 +1471,19 @@ impl Effect for Applaudimetre {
             }
         }
 
+        // Mettre à jour les animations
+        self.animation_time += 1.0 + self.current_level * 2.0;
+        self.background_pulse = (self.animation_time * 0.05).sin() * 0.1 + 0.9;
+        self.update_sparkles();
+
+        // Logs de débogage améliorés
         static mut APPLAUD_FRAME_COUNT: u64 = 0;
         unsafe {
             APPLAUD_FRAME_COUNT += 1;
             if APPLAUD_FRAME_COUNT % 30 == 0 {
                 println!(
-                    "👏 [Applaudimètre] Level: {:.3}, Max: {:.3}, Hold: {:.1}s",
-                    self.current_level, self.max_level, self.max_hold_time
+                    "👏 [Applaudimètre] Level: {:.3}, Max: {:.3}, Hold: {:.1}s, Gain: {:.2}, Sparkles: {}",
+                    self.current_level, self.max_level, self.max_hold_time, self.auto_gain, self.peak_sparkles.len()
                 );
             }
         }
@@ -1373,61 +1493,116 @@ impl Effect for Applaudimetre {
         frame.par_chunks_mut(3).enumerate().for_each(|(i, pixel)| {
             let x = i % 128;
             let y = i / 128;
-            let bar_left = 44;
-            let bar_right = 84;
+            let bar_left = 40;    // Barre légèrement plus large
+            let bar_right = 88;
+            let bar_center = (bar_left + bar_right) / 2;
 
             if x >= bar_left && x < bar_right {
                 let y_pos = (127 - y) as f32 / 127.0;
                 let bar_height = self.current_level.min(1.0);
 
+                // Effet de traînée - afficher l'historique des niveaux avec transparence
+                let history_index = ((x - bar_left) as f32 / (bar_right - bar_left) as f32 * self.level_history.len() as f32) as usize;
+                if history_index < self.level_history.len() {
+                    let historical_level = self.level_history[history_index];
+                    if y_pos <= historical_level && historical_level > 0.05 {
+                        let trail_intensity = 0.2 + (historical_level / self.current_level.max(0.1)) * 0.3;
+                        let (r, g, b) = self.get_color_for_level(y_pos, false);
+
+                        pixel[0] = (r * trail_intensity * 255.0) as u8;
+                        pixel[1] = (g * trail_intensity * 255.0) as u8;
+                        pixel[2] = (b * trail_intensity * 255.0) as u8;
+                    }
+                }
+
+                // Barre principale avec effet de brillance
                 if y_pos <= bar_height && bar_height > 0.0 {
-                    let level_factor = if bar_height > 0.01 {
-                        y_pos / bar_height
-                    } else {
-                        0.0
-                    };
-                    let brightness = 0.8 + level_factor * 0.2;
+                    let level_factor = y_pos / bar_height.max(0.01);
+
+                    // Effet de brillance au centre de la barre
+                    let distance_from_center = ((x - bar_center) as f32 / ((bar_right - bar_left) / 2) as f32).abs();
+                    let center_glow = (1.0 - distance_from_center).max(0.0);
+
+                    let brightness = 0.7 + level_factor * 0.3 + center_glow * 0.3;
                     let (r, g, b) = self.get_color_for_level(level_factor, false);
 
-                    pixel[0] = (r * brightness * 255.0) as u8;
-                    pixel[1] = (g * brightness * 255.0) as u8;
-                    pixel[2] = (b * brightness * 255.0) as u8;
+                    // Ajouter une pulsation basée sur l'intensité
+                    let pulse = 1.0 + self.current_level * (self.animation_time * 0.1).sin() * 0.2;
+
+                    pixel[0] = (r * brightness * pulse * 255.0).min(255.0) as u8;
+                    pixel[1] = (g * brightness * pulse * 255.0).min(255.0) as u8;
+                    pixel[2] = (b * brightness * pulse * 255.0).min(255.0) as u8;
                 }
 
+                // Indicateur de maximum avec animation améliorée
                 let max_y = (127.0 - self.max_level * 127.0) as usize;
-                if y >= max_y.saturating_sub(1) && y <= max_y.saturating_add(1) && self.max_level > 0.05 {
+                if y >= max_y.saturating_sub(2) && y <= max_y.saturating_add(2) && self.max_level > 0.05 {
                     let (r, g, b) = self.get_color_for_level(self.max_level, true);
+
+                    // Animation de clignotement plus sophistiquée
                     let blink_factor = if self.max_hold_time < 5.0 {
-                        0.7 + 0.3 * (self.max_hold_time * 10.0).sin().abs()
+                        // Clignotement rapide avec variation
+                        let base_blink = 0.8 + 0.2 * (self.max_hold_time * 8.0).sin();
+                        let pulse_blink = 1.0 + 0.3 * (self.animation_time * 0.15).sin();
+                        base_blink * pulse_blink
                     } else {
-                        0.5 + 0.5 * (self.max_hold_time * 3.0).sin().abs()
+                        // Clignotement de décroissance
+                        0.6 + 0.4 * (self.max_hold_time * 2.0).sin().abs()
                     };
 
-                    pixel[0] = (r * blink_factor * 255.0) as u8;
-                    pixel[1] = (g * blink_factor * 255.0) as u8;
-                    pixel[2] = (b * blink_factor * 255.0) as u8;
+                    // Effet de largeur variable
+                    let width_factor = if (y as i32 - max_y as i32).abs() <= 1 { 1.0 } else { 0.7 };
+
+                    pixel[0] = (r * blink_factor * width_factor * 255.0) as u8;
+                    pixel[1] = (g * blink_factor * width_factor * 255.0) as u8;
+                    pixel[2] = (b * blink_factor * width_factor * 255.0) as u8;
                 }
 
-                if x == bar_left || x == bar_right - 1 {
-                    for grad in 0..10 {
-                        let grad_y = (127.0 - (grad as f32 * 127.0 / 9.0)) as usize;
+                // Graduations améliorées avec effet de profondeur
+                if x == bar_left + 1 || x == bar_right - 2 {
+                    for grad in 0..11 {  // Plus de graduations
+                        let grad_y = (127.0 - (grad as f32 * 127.0 / 10.0)) as usize;
                         if y >= grad_y.saturating_sub(1) && y <= grad_y.saturating_add(1) {
-                            let intensity = if grad == 9 { 0.8 } else { 0.4 };
-                            pixel[0] = (128.0 * intensity) as u8;
-                            pixel[1] = (128.0 * intensity) as u8;
-                            pixel[2] = (128.0 * intensity) as u8;
+                            let intensity = if grad == 10 { 0.9 } else if grad % 2 == 0 { 0.6 } else { 0.3 };
+                            let background_effect = intensity * self.background_pulse;
+
+                            pixel[0] = (150.0 * background_effect) as u8;
+                            pixel[1] = (150.0 * background_effect) as u8;
+                            pixel[2] = (150.0 * background_effect) as u8;
                         }
                     }
                 }
             }
 
-            if ((x == bar_left - 1 || x == bar_right) && y < 128) ||
-               ((y == 0 || y == 127) && x >= bar_left - 1 && x <= bar_right) {
-                pixel[0] = 64;
-                pixel[1] = 64;
-                pixel[2] = 64;
+            // Cadre avec effet de lueur
+            let is_frame = ((x == bar_left - 1 || x == bar_right) && y < 128) ||
+                          ((y == 0 || y == 127) && x >= bar_left - 1 && x <= bar_right);
+
+            if is_frame {
+                let glow_intensity = 80.0 + self.current_level * 50.0;
+                pixel[0] = glow_intensity as u8;
+                pixel[1] = glow_intensity as u8;
+                pixel[2] = glow_intensity as u8;
             }
         });
+
+        // Dessiner les étincelles par-dessus
+        for sparkle in &self.peak_sparkles {
+            let x = sparkle.x as usize;
+            let y = sparkle.y as usize;
+
+            if x < 128 && y < 128 {
+                let idx = (y * 128 + x) * 3;
+                if idx + 2 < frame.len() {
+                    let intensity = sparkle.brightness * sparkle.life;
+
+                    // Additive blending pour les étincelles
+                    frame[idx] = ((sparkle.color.0 * intensity * 255.0) as u8).saturating_add(frame[idx]);
+                    frame[idx + 1] = ((sparkle.color.1 * intensity * 255.0) as u8).saturating_add(frame[idx + 1]);
+                    frame[idx + 2] = ((sparkle.color.2 * intensity * 255.0) as u8).saturating_add(frame[idx + 2]);
+                }
+            }
+        }
     }
 
     fn set_color_mode(&mut self, mode: &str) {
@@ -1437,6 +1612,599 @@ impl Effect for Applaudimetre {
     fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
         println!(
             "   Applaudimètre: custom color set to ({:.2}, {:.2}, {:.2})",
+            r, g, b
+        );
+    }
+}
+
+// Effet 7: Pluie d'Étoiles (Starfall)
+pub struct Starfall {
+    stars: Vec<FallingStar>,
+    animation_time: f32,
+}
+
+struct FallingStar {
+    x: f32,
+    y: f32,
+    speed: f32,
+    brightness: f32,
+    size: f32,
+    color: (f32, f32, f32),
+    trail_length: f32,
+}
+
+impl Starfall {
+    pub fn new() -> Self {
+        let mut stars = Vec::new();
+
+        // Créer quelques étoiles initiales
+        for _ in 0..20 {
+            stars.push(FallingStar {
+                x: rand() * 150.0 - 20.0,  // Commencer un peu à gauche
+                y: rand() * 150.0 - 20.0,  // Commencer un peu en haut
+                speed: 1.0 + rand() * 2.0,
+                brightness: 0.3 + rand() * 0.7,
+                size: 1.0 + rand() * 2.0,
+                color: (0.8 + rand() * 0.2, 0.8 + rand() * 0.2, 1.0), // Blanc-bleu
+                trail_length: 3.0 + rand() * 5.0,
+            });
+        }
+
+        Self {
+            stars,
+            animation_time: 0.0,
+        }
+    }
+
+    fn get_star_color(&self, base_color: (f32, f32, f32), brightness: f32) -> (f32, f32, f32) {
+        let color_mode = unsafe { &GLOBAL_COLOR_CONFIG };
+
+        match color_mode.mode.as_str() {
+            "rainbow" => {
+                // Couleurs arc-en-ciel qui changent avec le temps
+                let hue = (self.animation_time * 0.01 + brightness) % 1.0;
+                hsv_to_rgb(hue, 0.8, brightness)
+            }
+            "fire" => {
+                // Étoiles de feu (rouge-orange-jaune)
+                let intensity = brightness;
+                if intensity < 0.5 {
+                    (intensity * 2.0, intensity * 0.5, 0.0)
+                } else {
+                    (1.0, 0.5 + (intensity - 0.5), (intensity - 0.5) * 0.5)
+                }
+            }
+            "ocean" => {
+                // Étoiles océan (bleu-cyan)
+                (brightness * 0.2, brightness * 0.7, brightness)
+            }
+            "sunset" => {
+                // Étoiles coucher de soleil (orange-rose)
+                (brightness, brightness * 0.6, brightness * 0.8)
+            }
+            "custom" => {
+                let (r, g, b) = color_mode.custom_color;
+                (r * brightness, g * brightness, b * brightness)
+            }
+            _ => {
+                // Blanc-bleu par défaut
+                (base_color.0 * brightness, base_color.1 * brightness, base_color.2 * brightness)
+            }
+        }
+    }
+}
+
+impl Effect for Starfall {
+    fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
+        // Analyser l'intensité sonore
+        let bass_energy = spectrum[..8].iter().sum::<f32>() / 8.0;
+        let mid_energy = spectrum[8..24].iter().sum::<f32>() / 16.0;
+        let high_energy = spectrum[24..].iter().sum::<f32>() / 40.0;
+
+        // Amplifier la sensibilité
+        let sensitivity = 4.0;
+        let bass = (bass_energy * sensitivity).min(1.0);
+        let mid = (mid_energy * sensitivity).min(1.0);
+        let high = (high_energy * sensitivity).min(1.0);
+
+        // Intensité totale pour contrôler le nombre d'étoiles
+        let total_energy = (bass * 0.4 + mid * 0.4 + high * 0.2).min(1.0);
+
+        self.animation_time += 0.5;
+
+        // Effacer l'écran
+        frame.fill(0);
+
+        // Mettre à jour les étoiles existantes
+        let mut i = 0;
+        while i < self.stars.len() {
+            let star = &mut self.stars[i];
+
+            // Mouvement diagonal (haut-gauche vers bas-droit)
+            star.x += star.speed * 0.7;  // Mouvement horizontal
+            star.y += star.speed;        // Mouvement vertical (plus rapide)
+
+            // Ajouter un peu de variation basée sur l'audio
+            if total_energy > 0.1 {
+                star.x += (rand() - 0.5) * total_energy * 0.5;
+                star.y += total_energy * 0.3;
+            }
+
+            // Supprimer les étoiles qui sortent de l'écran
+            if star.x > 150.0 || star.y > 150.0 {
+                self.stars.swap_remove(i);
+            } else {
+                i += 1;
+            }
+        }
+
+        // Ajouter de nouvelles étoiles selon l'intensité sonore
+        let base_spawn_chance = 0.1;
+        let audio_spawn_boost = total_energy * 0.8;  // Jusqu'à 80% de chance supplémentaire
+        let spawn_chance = base_spawn_chance + audio_spawn_boost;
+
+        if rand() < spawn_chance {
+            // Nombre d'étoiles à créer (plus de son = plus d'étoiles)
+            let star_count = (1.0 + total_energy * 5.0) as usize;  // 1 à 6 étoiles
+
+            for _ in 0..star_count {
+                if self.stars.len() < 150 {  // Limite pour éviter la surcharge
+                    // Spawn en haut à gauche avec un peu de variation
+                    let spawn_x = -20.0 + rand() * 40.0;  // Entre -20 et 20
+                    let spawn_y = -20.0 + rand() * 40.0;  // Entre -20 et 20
+
+                    // Vitesse influencée par l'audio
+                    let base_speed = 1.0 + rand() * 2.0;
+                    let audio_speed_boost = total_energy * 2.0;
+                    let final_speed = base_speed + audio_speed_boost;
+
+                    // Taille et luminosité influencées par l'audio
+                    let size = 1.0 + rand() * 1.5 + total_energy * 2.0;
+                    let brightness = 0.4 + rand() * 0.4 + total_energy * 0.2;
+
+                    // Couleur de base (blanc-bleu étoilé)
+                    let base_color = (
+                        0.8 + rand() * 0.2,
+                        0.8 + rand() * 0.2,
+                        1.0
+                    );
+
+                    // Traînée plus longue avec plus de son
+                    let trail = 3.0 + rand() * 4.0 + total_energy * 5.0;
+
+                    self.stars.push(FallingStar {
+                        x: spawn_x,
+                        y: spawn_y,
+                        speed: final_speed,
+                        brightness,
+                        size,
+                        color: base_color,
+                        trail_length: trail,
+                    });
+                }
+            }
+        }
+
+        // Log de débogage
+        static mut STARFALL_FRAME_COUNT: u64 = 0;
+        unsafe {
+            STARFALL_FRAME_COUNT += 1;
+            if STARFALL_FRAME_COUNT % 60 == 0 && total_energy > 0.01 {
+                println!(
+                    "⭐ [Starfall] Energy: {:.2}, Stars: {}, Spawn: {:.0}%",
+                    total_energy,
+                    self.stars.len(),
+                    spawn_chance * 100.0
+                );
+            }
+        }
+
+        // Dessiner les étoiles avec leurs traînées
+        for star in &self.stars {
+            // Dessiner la traînée (points derrière l'étoile)
+            let trail_points = (star.trail_length * star.brightness) as usize;
+            for i in 0..trail_points {
+                let trail_factor = i as f32 / trail_points as f32;
+
+                // Position de la traînée (inverse du mouvement)
+                let trail_x = star.x - star.speed * 0.7 * trail_factor * 1.5;
+                let trail_y = star.y - star.speed * trail_factor * 1.5;
+
+                let x = trail_x as i32;
+                let y = trail_y as i32;
+
+                if x >= 0 && x < 128 && y >= 0 && y < 128 {
+                    let idx = (y as usize * 128 + x as usize) * 3;
+                    if idx + 2 < frame.len() {
+                        // Intensité de la traînée diminue vers l'arrière
+                        let trail_intensity = star.brightness * (1.0 - trail_factor) * 0.4;
+                        let (r, g, b) = self.get_star_color(star.color, trail_intensity);
+
+                        frame[idx] = (r * 255.0) as u8;
+                        frame[idx + 1] = (g * 255.0) as u8;
+                        frame[idx + 2] = (b * 255.0) as u8;
+                    }
+                }
+            }
+
+            // Dessiner l'étoile principale (plus brillante)
+            let star_size = star.size as i32;
+            for dy in -star_size..=star_size {
+                for dx in -star_size..=star_size {
+                    let x = star.x as i32 + dx;
+                    let y = star.y as i32 + dy;
+
+                    if x >= 0 && x < 128 && y >= 0 && y < 128 {
+                        let distance = ((dx * dx + dy * dy) as f32).sqrt();
+
+                        // Forme d'étoile simple (plus brillant au centre)
+                        if distance <= star.size {
+                            let idx = (y as usize * 128 + x as usize) * 3;
+                            if idx + 2 < frame.len() {
+                                // Intensité diminue du centre vers les bords
+                                let center_falloff = (1.0 - distance / star.size).max(0.0);
+                                let final_brightness = star.brightness * center_falloff;
+
+                                let (r, g, b) = self.get_star_color(star.color, final_brightness);
+
+                                // Additive blending pour un effet lumineux
+                                frame[idx] = ((r * 255.0) as u8).saturating_add(frame[idx]);
+                                frame[idx + 1] = ((g * 255.0) as u8).saturating_add(frame[idx + 1]);
+                                frame[idx + 2] = ((b * 255.0) as u8).saturating_add(frame[idx + 2]);
+                            }
+                        }
+
+                        // Ajouter des "rayons" d'étoile (croix)
+                        if (dx == 0 && dy.abs() <= star_size + 1) || (dy == 0 && dx.abs() <= star_size + 1) {
+                            let idx = (y as usize * 128 + x as usize) * 3;
+                            if idx + 2 < frame.len() {
+                                let ray_brightness = star.brightness * 0.6;
+                                let (r, g, b) = self.get_star_color(star.color, ray_brightness);
+
+                                frame[idx] = ((r * 150.0) as u8).saturating_add(frame[idx]);
+                                frame[idx + 1] = ((g * 150.0) as u8).saturating_add(frame[idx + 1]);
+                                frame[idx + 2] = ((b * 150.0) as u8).saturating_add(frame[idx + 2]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Effet d'explosion d'étoiles lors de pics sonores très forts
+        if total_energy > 0.8 && rand() < 0.2 {
+            // Créer une "supernova" temporaire
+            for _ in 0..8 {
+                let explosion_x = 20.0 + rand() * 88.0;  // Position aléatoire sur l'écran
+                let explosion_y = 20.0 + rand() * 88.0;
+
+                // Dessiner une explosion étoilée
+                for ray in 0..8 {
+                    let angle = (ray as f32 / 8.0) * 6.28;
+                    let length = 5.0 + rand() * 10.0;
+
+                    for step in 0..(length as i32) {
+                        let x = (explosion_x + angle.cos() * step as f32) as i32;
+                        let y = (explosion_y + angle.sin() * step as f32) as i32;
+
+                        if x >= 0 && x < 128 && y >= 0 && y < 128 {
+                            let idx = (y as usize * 128 + x as usize) * 3;
+                            if idx + 2 < frame.len() {
+                                let explosion_brightness = (1.0 - step as f32 / length) * total_energy;
+                                let (r, g, b) = self.get_star_color((1.0, 1.0, 1.0), explosion_brightness);
+
+                                frame[idx] = ((r * 200.0) as u8).saturating_add(frame[idx]);
+                                frame[idx + 1] = ((g * 200.0) as u8).saturating_add(frame[idx + 1]);
+                                frame[idx + 2] = ((b * 200.0) as u8).saturating_add(frame[idx + 2]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn set_color_mode(&mut self, mode: &str) {
+        println!("⭐ [Starfall] Color mode set to '{}'", mode);
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        println!(
+            "⭐ [Starfall] Custom color set to ({:.2}, {:.2}, {:.2})",
+            r, g, b
+        );
+    }
+}
+
+
+// Effet 8: Coeur Battant
+pub struct Heartbeat {
+    beat_phase: f32,
+    beat_intensity: f32,
+    heart_size: f32,
+    pulse_rings: Vec<PulseRing>,
+    animation_time: f32,
+    last_beat_time: f32,
+    beat_frequency: f32,
+}
+
+struct PulseRing {
+    radius: f32,
+    life: f32,
+    intensity: f32,
+    color: (f32, f32, f32),
+}
+
+impl Heartbeat {
+    pub fn new() -> Self {
+        Self {
+            beat_phase: 0.0,
+            beat_intensity: 0.5,
+            heart_size: 20.0,
+            pulse_rings: Vec::new(),
+            animation_time: 0.0,
+            last_beat_time: 0.0,
+            beat_frequency: 60.0,  // 60 BPM par defaut
+        }
+    }
+
+    fn get_heart_color(&self, intensity: f32) -> (f32, f32, f32) {
+        let color_mode = unsafe { &GLOBAL_COLOR_CONFIG };
+
+        match color_mode.mode.as_str() {
+            "rainbow" => {
+                // Arc-en-ciel qui pulse
+                let hue = (self.animation_time * 0.01) % 1.0;
+                hsv_to_rgb(hue, 0.8, intensity)
+            }
+            "fire" => {
+                // Coeur de feu (rouge intense vers jaune)
+                if intensity < 0.5 {
+                    (intensity * 2.0, 0.0, 0.0)  // Rouge profond
+                } else {
+                    (1.0, (intensity - 0.5) * 2.0, 0.0)  // Rouge vers orange
+                }
+            }
+            "ocean" => {
+                // Coeur d'ocean (bleu vers cyan)
+                (intensity * 0.2, intensity * 0.6, intensity)
+            }
+            "sunset" => {
+                // Coeur coucher de soleil (rose vers orange)
+                (intensity, intensity * 0.4, intensity * 0.6)
+            }
+            "custom" => {
+                let (r, g, b) = color_mode.custom_color;
+                (r * intensity, g * intensity, b * intensity)
+            }
+            _ => {
+                // Rouge classique pour un coeur
+                (intensity, intensity * 0.2, intensity * 0.2)
+            }
+        }
+    }
+
+    // Fonction pour dessiner un coeur mathematique
+    fn is_inside_heart(&self, x: f32, y: f32, center_x: f32, center_y: f32, scale: f32) -> f32 {
+        // Normaliser les coordonnees par rapport au centre et a l'echelle
+        let nx = (x - center_x) / scale;
+        let ny = (y - center_y) / scale;
+
+        // Equation mathematique d'un coeur
+        // (x^2 + y^2 - 1)^3 - x^2 * y^3 <= 0
+        let x2 = nx * nx;
+        let y2 = ny * ny;
+        let heart_eq = (x2 + y2 - 1.0).powi(3) - x2 * ny.powi(3);
+
+        if heart_eq <= 0.0 {
+            // A l'interieur du coeur, calculer l'intensite basee sur la distance du bord
+            let distance_factor = (-heart_eq).min(0.5) / 0.5;
+            return distance_factor.max(0.3);  // Minimum d'intensite pour la visibilite
+        }
+
+        0.0  // A l'exterieur du coeur
+    }
+}
+
+impl Effect for Heartbeat {
+    fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
+        // Analyser l'intensite sonore
+        let bass_energy = spectrum[..8].iter().sum::<f32>() / 8.0;
+        let mid_energy = spectrum[8..24].iter().sum::<f32>() / 16.0;
+        let high_energy = spectrum[24..].iter().sum::<f32>() / 40.0;
+
+        // Amplifier la sensibilite
+        let sensitivity = 5.0;
+        let bass = (bass_energy * sensitivity).min(1.0);
+        let mid = (mid_energy * sensitivity).min(1.0);
+        let high = (high_energy * sensitivity).min(1.0);
+
+        // Intensite totale (privilegier les basses pour le rythme)
+        let total_energy = (bass * 0.6 + mid * 0.3 + high * 0.1).min(1.0);
+
+        // Calculer la frequence des battements (40 BPM a 140 BPM)
+        self.beat_frequency = 40.0 + total_energy * 100.0;
+        let beat_interval = 60.0 / self.beat_frequency;  // Intervalle en secondes
+
+        self.animation_time += 1.0 / 60.0;  // En supposant 60 FPS
+
+        // Declencher un battement
+        if self.animation_time - self.last_beat_time >= beat_interval {
+            self.last_beat_time = self.animation_time;
+            self.beat_phase = 0.0;
+
+            // Creer un anneau de pulsation
+            self.pulse_rings.push(PulseRing {
+                radius: 0.0,
+                life: 1.0,
+                intensity: 0.3 + total_energy * 0.7,
+                color: self.get_heart_color(1.0),
+            });
+        }
+
+        // Mise a jour de la phase de battement (systole et diastole)
+        self.beat_phase += (self.beat_frequency / 60.0) * 0.15;  // Vitesse de l'animation
+
+        // Calcul de l'intensite du battement (double pic pour imiter un vrai coeur)
+        let double_beat = if self.beat_phase % 1.0 < 0.3 {
+            // Premier battement (systole)
+            ((self.beat_phase % 1.0) * 10.0).sin().max(0.0)
+        } else if self.beat_phase % 1.0 < 0.5 {
+            // Deuxieme battement (plus faible)
+            (((self.beat_phase % 1.0) - 0.3) * 15.0).sin().max(0.0) * 0.6
+        } else {
+            // Repos (diastole)
+            0.2
+        };
+
+        self.beat_intensity = 0.4 + double_beat * (0.3 + total_energy * 0.3);
+
+        // Taille du coeur basee sur l'intensite et le battement
+        let base_size = 15.0 + total_energy * 25.0;  // 15 a 40 pixels
+        self.heart_size = base_size * (0.8 + self.beat_intensity * 0.4);
+
+        // Mise a jour des anneaux de pulsation
+        self.pulse_rings.retain_mut(|ring| {
+            ring.radius += 2.0 + total_energy * 3.0;
+            ring.life -= 0.02;
+            ring.intensity *= 0.98;
+            ring.life > 0.0 && ring.radius < 100.0
+        });
+
+        // Log de debogage
+        static mut HEART_FRAME_COUNT: u64 = 0;
+        unsafe {
+            HEART_FRAME_COUNT += 1;
+            if HEART_FRAME_COUNT % 60 == 0 && total_energy > 0.01 {
+                println!(
+                    "💖 [Heartbeat] BPM: {:.0}, Size: {:.1}, Intensity: {:.2}, Rings: {}",
+                    self.beat_frequency, self.heart_size, self.beat_intensity, self.pulse_rings.len()
+                );
+            }
+        }
+
+        // Effacer l'ecran avec un fond tres sombre
+        frame.fill(0);
+
+        let center_x = 64.0;
+        let center_y = 64.0;
+
+        // Dessiner les anneaux de pulsation
+        for ring in &self.pulse_rings {
+            for angle_step in 0..64 {
+                let angle = (angle_step as f32 / 64.0) * 6.28;
+                let x = center_x + angle.cos() * ring.radius;
+                let y = center_y + angle.sin() * ring.radius;
+
+                if x >= 0.0 && x < 128.0 && y >= 0.0 && y < 128.0 {
+                    let px = x as usize;
+                    let py = y as usize;
+                    let idx = (py * 128 + px) * 3;
+
+                    if idx + 2 < frame.len() {
+                        let ring_intensity = ring.intensity * ring.life * 0.3;
+
+                        frame[idx] = ((ring.color.0 * ring_intensity * 255.0) as u8).saturating_add(frame[idx]);
+                        frame[idx + 1] = ((ring.color.1 * ring_intensity * 255.0) as u8).saturating_add(frame[idx + 1]);
+                        frame[idx + 2] = ((ring.color.2 * ring_intensity * 255.0) as u8).saturating_add(frame[idx + 2]);
+                    }
+                }
+            }
+        }
+
+        // Dessiner le coeur principal
+        for y in 0..128 {
+            for x in 0..128 {
+                let heart_intensity = self.is_inside_heart(
+                    x as f32,
+                    y as f32,
+                    center_x,
+                    center_y,
+                    self.heart_size
+                );
+
+                if heart_intensity > 0.0 {
+                    let idx = (y * 128 + x) * 3;
+                    if idx + 2 < frame.len() {
+                        // Intensite finale combinant la forme du coeur et le battement
+                        let final_intensity = heart_intensity * self.beat_intensity;
+
+                        // Effet de gradient du centre vers l'exterieur
+                        let distance_from_center = ((x as f32 - center_x).powi(2) + (y as f32 - center_y).powi(2)).sqrt();
+                        let center_glow = (1.0 - (distance_from_center / self.heart_size).min(1.0)) * 0.3 + 0.7;
+
+                        let (r, g, b) = self.get_heart_color(final_intensity * center_glow);
+
+                        // Effet de pulsation lumineuse
+                        let pulse_glow = 1.0 + (self.beat_phase * 12.56).sin() * total_energy * 0.3;
+
+                        frame[idx] = (r * pulse_glow * 255.0).min(255.0) as u8;
+                        frame[idx + 1] = (g * pulse_glow * 255.0).min(255.0) as u8;
+                        frame[idx + 2] = (b * pulse_glow * 255.0).min(255.0) as u8;
+                    }
+                }
+            }
+        }
+
+        // Ajouter des etincelles autour du coeur lors de battements forts
+        if self.beat_intensity > 0.8 && total_energy > 0.5 {
+            let sparkle_count = (total_energy * 15.0) as usize;
+
+            for _ in 0..sparkle_count {
+                // Position aleatoire autour du coeur
+                let angle = rand() * 6.28;
+                let distance = self.heart_size + 5.0 + rand() * 15.0;
+
+                let sparkle_x = center_x + angle.cos() * distance;
+                let sparkle_y = center_y + angle.sin() * distance;
+
+                if sparkle_x >= 0.0 && sparkle_x < 128.0 && sparkle_y >= 0.0 && sparkle_y < 128.0 {
+                    let px = sparkle_x as usize;
+                    let py = sparkle_y as usize;
+                    let idx = (py * 128 + px) * 3;
+
+                    if idx + 2 < frame.len() {
+                        let sparkle_intensity = 0.5 + rand() * 0.5;
+                        let (r, g, b) = self.get_heart_color(sparkle_intensity);
+
+                        frame[idx] = ((r * 200.0) as u8).saturating_add(frame[idx]);
+                        frame[idx + 1] = ((g * 200.0) as u8).saturating_add(frame[idx + 1]);
+                        frame[idx + 2] = ((b * 200.0) as u8).saturating_add(frame[idx + 2]);
+                    }
+                }
+            }
+        }
+
+        // Effet de flash lors de battements tres intenses
+        if self.beat_intensity > 0.9 && total_energy > 0.7 {
+            let flash_intensity = (self.beat_intensity - 0.9) * 10.0 * total_energy;
+            let (flash_r, flash_g, flash_b) = self.get_heart_color(1.0);
+
+            // Flash global autour du coeur
+            for y in (center_y as usize).saturating_sub(50)..((center_y as usize + 50).min(128)) {
+                for x in (center_x as usize).saturating_sub(50)..((center_x as usize + 50).min(128)) {
+                    let idx = (y * 128 + x) * 3;
+                    if idx + 2 < frame.len() {
+                        let distance = ((x as f32 - center_x).powi(2) + (y as f32 - center_y).powi(2)).sqrt();
+                        let flash_falloff = (1.0 - distance / 50.0).max(0.0);
+                        let flash_add = flash_intensity * flash_falloff * 50.0;
+
+                        frame[idx] = ((flash_r * flash_add) as u8).saturating_add(frame[idx]);
+                        frame[idx + 1] = ((flash_g * flash_add) as u8).saturating_add(frame[idx + 1]);
+                        frame[idx + 2] = ((flash_b * flash_add) as u8).saturating_add(frame[idx + 2]);
+                    }
+                }
+            }
+        }
+    }
+
+    fn set_color_mode(&mut self, mode: &str) {
+        println!("💖 [Heartbeat] Color mode set to '{}'", mode);
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        println!(
+            "💖 [Heartbeat] Custom color set to ({:.2}, {:.2}, {:.2})",
             r, g, b
         );
     }
