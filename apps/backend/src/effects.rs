@@ -46,11 +46,11 @@ impl EffectEngine {
                 Box::new(SpectrumBars::new()) as Box<dyn Effect>,
                 Box::new(CircularWave::new()) as Box<dyn Effect>,
                 Box::new(ParticleSystem::new()) as Box<dyn Effect>,
-                Box::new(Applaudimetre::new()) as Box<dyn Effect>,
-                Box::new(Flames::new()) as Box<dyn Effect>,
-                Box::new(Rain::new()) as Box<dyn Effect>,
-                Box::new(Starfall::new()) as Box<dyn Effect>,
                 Box::new(Heartbeat::new()) as Box<dyn Effect>,
+                Box::new(Starfall::new()) as Box<dyn Effect>,
+                Box::new(Rain::new()) as Box<dyn Effect>,
+                Box::new(Flames::new()) as Box<dyn Effect>,
+                Box::new(Applaudimetre::new()) as Box<dyn Effect>,
             ],
             current: 0,
             transition: 0.0,
@@ -727,108 +727,230 @@ impl Effect for ParticleSystem {
         // Custom color is now set globally
     }
 }
+// Effet Flammes Amélioré: Flammèche réaliste qui grandit avec le son
+use rand::Rng;
+use std::f32::consts::PI;
 
-// Effet 4: Flammes
 pub struct Flames {
-    // Tableau de hauteurs pour les flammes
-    heights: Vec<f32>,
-    // Chaleur à la base des flammes
+    // Particules de flammes individuelles
+    particles: Vec<FlameParticle>,
+    // Sources de chaleur à la base
     heat_sources: Vec<f32>,
-    // Facteur de refroidissement
-    cooling_map: Vec<f32>,
-    // Compteur d'animation
-    animation_counter: f32,
+    // Compteur d'animation pour les mouvements naturels
+    time: f32,
+    // Historique de l'intensité sonore pour un effet plus fluide
+    sound_history: Vec<f32>,
+    // Température globale de la flamme
+    base_temperature: f32,
+    // Générateur de nombres aléatoires
+    rng: rand::rngs::ThreadRng,
+}
+
+// Structure pour une particule de flamme individuelle
+#[derive(Clone)]
+struct FlameParticle {
+    x: f32,
+    y: f32,
+    velocity_x: f32,
+    velocity_y: f32,
+    temperature: f32,
+    age: f32,
+    max_age: f32,
+    size: f32,
+    turbulence_offset: f32,
+}
+
+impl FlameParticle {
+    fn new(x: f32, y: f32, temperature: f32, rng: &mut rand::rngs::ThreadRng) -> Self {
+        Self {
+            x,
+            y,
+            velocity_x: rng.gen_range(-0.5..0.5),
+            velocity_y: rng.gen_range(-2.0..-0.5), // Toujours vers le haut
+            temperature,
+            age: 0.0,
+            max_age: rng.gen_range(15.0..45.0),
+            size: rng.gen_range(0.5..2.0),
+            turbulence_offset: rng.gen::<f32>() * 2.0 * PI,
+        }
+    }
+
+    fn update(&mut self, time: f32, wind_force: f32, sound_intensity: f32) {
+        self.age += 1.0;
+
+        // Turbulence naturelle pour un mouvement réaliste
+        let turbulence_x = (time * 0.1 + self.turbulence_offset).sin() * 0.3;
+        let turbulence_y = (time * 0.08 + self.turbulence_offset * 1.3).cos() * 0.2;
+
+        // Accélération vers le haut plus forte avec plus de son
+        self.velocity_y -= 0.15 + sound_intensity * 0.1;
+        self.velocity_x += turbulence_x + wind_force;
+
+        // Friction de l'air
+        self.velocity_x *= 0.98;
+        self.velocity_y *= 0.995;
+
+        // Mise à jour de la position
+        self.x += self.velocity_x;
+        self.y += self.velocity_y;
+
+        // Refroidissement progressif
+        let cooling_rate = 0.02 + (self.age / self.max_age) * 0.08;
+        self.temperature *= 1.0 - cooling_rate;
+
+        // La taille diminue avec l'âge mais peut augmenter avec le son
+        let age_factor = 1.0 - (self.age / self.max_age);
+        let sound_boost = 1.0 + sound_intensity * 0.5;
+        self.size = self.size * 0.999 * age_factor * sound_boost;
+    }
+
+    fn is_alive(&self) -> bool {
+        self.age < self.max_age &&
+        self.temperature > 0.05 &&
+        self.y > -10.0 &&
+        self.x > -10.0 &&
+        self.x < 138.0
+    }
 }
 
 impl Flames {
     pub fn new() -> Self {
-        // Initialiser les hauteurs des flammes à zéro
-        let mut heights = vec![0.0; 128];
-
-        // Initialiser les sources de chaleur
-        let mut heat_sources = vec![0.0; 128];
-
-        // Créer une carte de refroidissement avec des valeurs aléatoires
-        let mut cooling_map = vec![0.0; 128 * 128];
-        for i in 0..cooling_map.len() {
-            cooling_map[i] = rand() * 0.2;
-        }
-
         Self {
-            heights,
-            heat_sources,
-            cooling_map,
-            animation_counter: 0.0,
+            particles: Vec::new(),
+            heat_sources: vec![0.0; 128],
+            time: 0.0,
+            sound_history: vec![0.0; 10],
+            base_temperature: 0.0,
+            rng: rand::thread_rng(),
         }
     }
 
-    fn get_flame_color(&self, temperature: f32, x: usize, y: usize) -> (f32, f32, f32) {
+    fn get_flame_color(&self, temperature: f32, age_factor: f32) -> (f32, f32, f32) {
         let color_mode = unsafe { &GLOBAL_COLOR_CONFIG };
 
-        // Normaliser la température entre 0.0 et 1.0
-        let t = temperature.min(1.0).max(0.0);
+        // Normaliser la température
+        let t = temperature.clamp(0.0, 1.0);
 
         match color_mode.mode.as_str() {
-            // Mode flammes classique (rouge, orange, jaune)
             "fire" => {
-                if t < 0.2 {
-                    // Noir/rouge très sombre
-                    (t * 5.0 * 0.5, 0.0, 0.0)
-                } else if t < 0.5 {
+                // Flamme réaliste: bleu chaud -> rouge -> orange -> jaune -> blanc
+                if t < 0.15 {
+                    // Cœur très chaud: bleu-blanc
+                    (0.8 + t * 1.3, 0.8 + t * 1.3, 1.0)
+                } else if t < 0.3 {
+                    // Transition vers rouge chaud
+                    let factor = (t - 0.15) / 0.15;
+                    (1.0, 0.8 - factor * 0.3, 1.0 - factor * 0.8)
+                } else if t < 0.6 {
                     // Rouge vers orange
-                    (0.5 + (t - 0.2) * 0.5 / 0.3, (t - 0.2) * 0.4 / 0.3, 0.0)
-                } else {
+                    let factor = (t - 0.3) / 0.3;
+                    (1.0, 0.5 + factor * 0.5, 0.2 * factor)
+                } else if t < 0.85 {
                     // Orange vers jaune
-                    (1.0, 0.4 + (t - 0.5) * 0.6 / 0.5, (t - 0.5) * 0.2 / 0.5)
-                }
-            },
-            // Mode flammes bleues
-            "ocean" => {
-                if t < 0.2 {
-                    // Noir/bleu très sombre
-                    (0.0, 0.0, t * 5.0 * 0.5)
-                } else if t < 0.5 {
-                    // Bleu vers cyan
-                    (0.0, (t - 0.2) * 0.4 / 0.3, 0.5 + (t - 0.2) * 0.5 / 0.3)
+                    let factor = (t - 0.6) / 0.25;
+                    (1.0, 1.0, 0.2 + factor * 0.6)
                 } else {
-                    // Cyan vers blanc-bleu
-                    ((t - 0.5) * 0.5 / 0.5, 0.4 + (t - 0.5) * 0.6 / 0.5, 1.0)
+                    // Jaune pâle (parties les plus froides)
+                    (1.0 - (t - 0.85) * 0.3, 1.0 - (t - 0.85) * 0.2, 0.8)
                 }
             },
-            // Mode arc-en-ciel
+            "ocean" => {
+                // Flamme bleue froide
+                if t < 0.3 {
+                    (0.0, t * 0.5, 0.8 + t * 0.7)
+                } else if t < 0.7 {
+                    let factor = (t - 0.3) / 0.4;
+                    (factor * 0.3, 0.15 + factor * 0.5, 1.0)
+                } else {
+                    let factor = (t - 0.7) / 0.3;
+                    (0.3 + factor * 0.7, 0.65 + factor * 0.35, 1.0)
+                }
+            },
             "rainbow" => {
-                let hue = (self.animation_counter * 0.01 + (x as f32 / 128.0) * 0.5) % 1.0;
-                let saturation = 1.0 - t * 0.5; // Moins saturé en haut
+                let hue = (self.time * 0.02 + age_factor * 0.5) % 1.0;
+                let saturation = 0.8 + t * 0.2;
                 let value = t;
                 hsv_to_rgb(hue, saturation, value)
             },
-            // Mode coucher de soleil
             "sunset" => {
-                if t < 0.33 {
-                    // Violet foncé vers violet
-                    (0.2 + t * 0.3 / 0.33, 0.0, 0.3 + t * 0.3 / 0.33)
-                } else if t < 0.66 {
-                    // Violet vers rouge
-                    (0.5 + (t - 0.33) * 0.5 / 0.33, 0.0, 0.6 - (t - 0.33) * 0.6 / 0.33)
+                if t < 0.4 {
+                    // Violet profond
+                    (0.4 + t * 0.6, 0.1, 0.6 + t * 0.4)
+                } else if t < 0.7 {
+                    // Violet vers rouge-orange
+                    let factor = (t - 0.4) / 0.3;
+                    (1.0, 0.1 + factor * 0.5, 1.0 - factor * 0.8)
                 } else {
-                    // Rouge vers orange-jaune
-                    (1.0, (t - 0.66) * 0.8 / 0.34, 0.0)
+                    // Orange doré
+                    let factor = (t - 0.7) / 0.3;
+                    (1.0, 0.6 + factor * 0.4, 0.2 * (1.0 - factor))
                 }
             },
-            // Mode couleur personnalisée
             "custom" => {
                 let (r, g, b) = color_mode.custom_color;
-                (r * t, g * t, b * t)
+                let intensity = t.powf(0.7); // Courbe plus naturelle
+                (r * intensity, g * intensity, b * intensity)
             },
-            // Par défaut, flammes classiques
             _ => {
-                if t < 0.2 {
-                    (t * 5.0 * 0.5, 0.0, 0.0)
-                } else if t < 0.5 {
-                    (0.5 + (t - 0.2) * 0.5 / 0.3, (t - 0.2) * 0.4 / 0.3, 0.0)
+                // Par défaut: flamme classique
+                if t < 0.3 {
+                    (t * 3.0, 0.0, 0.0)
+                } else if t < 0.7 {
+                    let factor = (t - 0.3) / 0.4;
+                    (1.0, factor * 0.8, 0.0)
                 } else {
-                    (1.0, 0.4 + (t - 0.5) * 0.6 / 0.5, (t - 0.5) * 0.2 / 0.5)
+                    let factor = (t - 0.7) / 0.3;
+                    (1.0, 0.8 + factor * 0.2, factor * 0.6)
                 }
+            }
+        }
+    }
+
+    fn create_flame_base(&mut self, sound_intensity: f32) {
+        // Calculer le nombre de nouvelles particules basé sur l'intensité sonore
+        let base_particles = 2;
+        let sound_particles = (sound_intensity * 15.0) as usize;
+        let total_new_particles = base_particles + sound_particles;
+
+        // Largeur de la base de la flamme qui grandit avec le son
+        let base_width = 8.0 + sound_intensity * 20.0;
+        let base_center = 64.0;
+
+        for _ in 0..total_new_particles {
+            // Position aléatoire à la base
+            let x_offset = self.rng.gen_range(-base_width..base_width);
+            let x = base_center + x_offset;
+            let y = 127.0 + self.rng.gen_range(-2.0..2.0);
+
+            // Température plus élevée au centre
+            let distance_from_center = (x - base_center).abs() / base_width;
+            let center_boost = 1.0 - distance_from_center.clamp(0.0, 1.0);
+            let temperature = 0.7 + sound_intensity * 0.3 + center_boost * 0.2;
+
+            // Créer la particule
+            if x >= 0.0 && x < 128.0 {
+                let particle = FlameParticle::new(x, y, temperature, &mut self.rng);
+                self.particles.push(particle);
+            }
+        }
+    }
+
+    fn add_sparks(&mut self, sound_intensity: f32) {
+        // Ajouter des étincelles qui jaillissent avec le son fort
+        if sound_intensity > 0.3 && self.rng.gen::<f32>() < sound_intensity * 0.5 {
+            let spark_count = (sound_intensity * 5.0) as usize;
+
+            for _ in 0..spark_count {
+                let x = 64.0 + self.rng.gen_range(-30.0..30.0);
+                let y = 127.0 - self.rng.gen_range(0.0..40.0);
+
+                let mut spark = FlameParticle::new(x, y, 0.9, &mut self.rng);
+                spark.velocity_x = self.rng.gen_range(-3.0..3.0);
+                spark.velocity_y = self.rng.gen_range(-5.0..-1.0);
+                spark.max_age = self.rng.gen_range(8.0..20.0);
+                spark.size = self.rng.gen_range(0.3..1.0);
+
+                self.particles.push(spark);
             }
         }
     }
@@ -836,182 +958,104 @@ impl Flames {
 
 impl Effect for Flames {
     fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
-        // Analyser le spectre audio pour influencer les flammes
-        // Augmenter drastiquement la sensibilité en multipliant les valeurs du spectre
-        let sensitivity = 5.0; // Facteur d'amplification du signal audio beaucoup plus élevé
+        // Analyser le spectre audio avec une sensibilité adaptée
+        let bass_energy = (spectrum[..8].iter().sum::<f32>() / 8.0) * 3.0;
+        let mid_energy = (spectrum[8..24].iter().sum::<f32>() / 16.0) * 2.0;
+        let high_energy = (spectrum[24..].iter().sum::<f32>() / 40.0) * 1.5;
 
-        // Appliquer la sensibilité aux différentes bandes de fréquence
-        let bass_energy = (spectrum[..8].iter().sum::<f32>() / 8.0) * sensitivity;
-        let mid_energy = (spectrum[8..24].iter().sum::<f32>() / 16.0) * sensitivity;
-        let high_energy = (spectrum[24..].iter().sum::<f32>() / 40.0) * sensitivity;
+        // Combiner les énergies avec pondération
+        let raw_intensity = bass_energy * 0.6 + mid_energy * 0.3 + high_energy * 0.1;
+        let sound_intensity = raw_intensity.clamp(0.0, 1.0);
 
-        // Limiter les valeurs entre 0.0 et 1.0
-        let bass_energy = bass_energy.min(1.0);
-        let mid_energy = mid_energy.min(1.0);
-        let high_energy = high_energy.min(1.0);
+        // Mettre à jour l'historique pour un lissage
+        self.sound_history.remove(0);
+        self.sound_history.push(sound_intensity);
+        let smoothed_intensity = self.sound_history.iter().sum::<f32>() / self.sound_history.len() as f32;
 
-        // Donner beaucoup plus d'importance aux basses fréquences pour les flammes
-        // Utiliser une fonction non linéaire pour amplifier les petits signaux
-        let bass_contribution = bass_energy.powf(0.5) * 0.7; // Racine carrée pour amplifier les petits signaux
-        let mid_contribution = mid_energy.powf(0.6) * 0.25;
-        let high_contribution = high_energy.powf(0.7) * 0.05;
-
-        // Calculer l'énergie totale avec une amplification supplémentaire
-        let raw_energy = bass_contribution + mid_contribution + high_contribution;
-
-        // Appliquer une courbe de réponse non linéaire pour amplifier même les petits signaux
-        // Cette formule transforme les petites valeurs (0.1-0.3) en valeurs moyennes (0.4-0.6)
-        let total_energy = (raw_energy * 1.5).min(1.0);
-
-        // Log pour déboguer l'intensité sonore
-        if total_energy > 0.01 {
-            println!(
-                "🔥 [Flames] Bass: {:.2}, Mid: {:.2}, High: {:.2}, Total: {:.2}",
-                bass_energy,
-                mid_energy,
-                high_energy,
-                total_energy
-            );
+        // Debug de l'intensité
+        if sound_intensity > 0.02 {
+            println!("🔥 [Flames] Sound intensity: {:.3}, Smoothed: {:.3}, Particles: {}",
+                     sound_intensity, smoothed_intensity, self.particles.len());
         }
 
-        // Incrémenter le compteur d'animation
-        self.animation_counter += 0.5 + bass_energy * 2.0;
+        // Incrémenter le temps
+        self.time += 1.0 + sound_intensity * 2.0;
 
-        // Créer une matrice de température pour simuler les flammes
-        let mut temperature = vec![0.0; 128 * 128];
+        // Créer de nouvelles particules à la base
+        self.create_flame_base(smoothed_intensity);
 
-        // Calculer la hauteur maximale des flammes en fonction de l'intensité sonore
-        // Plus le son est fort, plus les flammes sont hautes
-        // Augmenter drastiquement la réactivité en rendant les flammes plus réactives
-        let min_height = 20.0; // Hauteur minimale des flammes réduite
-        let max_height = 127.0; // Hauteur maximale possible
+        // Ajouter des étincelles pour les sons forts
+        self.add_sparks(sound_intensity);
 
-        // Utiliser une fonction exponentielle pour la hauteur des flammes
-        // Cela rend les flammes beaucoup plus réactives aux changements d'intensité sonore
-        let height_factor = total_energy.powf(0.7); // Exposant < 1 pour amplifier les petits signaux
-        let max_flame_height = min_height + height_factor * (max_height - min_height); // Entre 20 et 127 pixels
+        // Force du vent basée sur les hautes fréquences
+        let wind_force = (high_energy - 0.1).max(0.0) * 0.3 * (self.time * 0.05).sin();
 
-        // Mettre à jour les sources de chaleur à la base en fonction du spectre audio
-        for x in 0..128 {
-            // Ajouter de l'aléatoire pour un effet plus naturel
-            let random_factor = 0.7 + rand() * 0.6;
+        // Mettre à jour toutes les particules
+        for particle in &mut self.particles {
+            particle.update(self.time, wind_force, sound_intensity);
+        }
 
-            // Calculer l'énergie en fonction de la position (plus d'énergie au centre)
-            let position_factor = 1.0 - ((x as f32 - 64.0).abs() / 64.0) * 0.5;
+        // Retirer les particules mortes
+        self.particles.retain(|p| p.is_alive());
 
-            // Combiner l'audio et l'aléatoire
-            let energy = (bass_energy * 1.5 + mid_energy * 0.8 + high_energy * 0.5) * position_factor * random_factor;
+        // Limiter le nombre de particules pour les performances
+        let max_particles = 300 + (sound_intensity * 200.0) as usize;
+        if self.particles.len() > max_particles {
+            self.particles.drain(0..self.particles.len() - max_particles);
+        }
 
-            // Mettre à jour la source de chaleur
-            self.heat_sources[x] = (self.heat_sources[x] * 0.8 + energy * 0.2).min(1.0);
+        // Effacer le frame
+        for pixel in frame.iter_mut() {
+            *pixel = 0;
+        }
 
-            // Appliquer la source de chaleur à la base de la matrice de température
-            let idx = (127 * 128 + x) as usize;
-            temperature[idx] = self.heat_sources[x];
+        // Créer un buffer de température pour le rendu
+        let mut temperature_buffer = vec![0.0f32; 128 * 128];
 
-            // Ajouter beaucoup plus d'étincelles quand le son est détecté
-            let base_chance = 0.25; // Chance de base plus élevée
-            let spark_chance = base_chance + total_energy * 0.7; // Entre 0.25 et 0.95 - extrêmement réactif
+        // Rendre chaque particule
+        for particle in &self.particles {
+            let px = particle.x as i32;
+            let py = particle.y as i32;
 
-            // Générer plusieurs étincelles par position
-            let spark_count = (1.0 + total_energy * 3.0) as usize; // Entre 1 et 4 étincelles par position
+            // Rendre la particule avec anti-aliasing
+            let radius = particle.size.max(1.0);
+            let radius_sq = radius * radius;
 
-            if rand() < spark_chance {
-                for _ in 0..spark_count {
-                    // Générer beaucoup plus d'étincelles avec une distribution plus large quand le son est fort
-                    let spread = 15.0 + total_energy * 25.0; // Entre 15 et 40 pixels de dispersion
-                    let spark_x = (x as f32 + (rand() - 0.5) * spread).max(0.0).min(127.0) as usize;
+            for dy in -(radius as i32)..=(radius as i32) {
+                for dx in -(radius as i32)..=(radius as i32) {
+                    let x = px + dx;
+                    let y = py + dy;
 
-                    // Les étincelles montent beaucoup plus haut quand le son est fort
-                    let height_factor = 0.4 + total_energy * 0.5; // Entre 0.4 et 0.9
-                    let spark_y = (127.0 - rand() * max_flame_height * height_factor) as usize;
+                    if x >= 0 && x < 128 && y >= 0 && y < 128 {
+                        let dist_sq = (dx * dx + dy * dy) as f32;
 
-                    // Étincelles plus intenses avec le son
-                    let intensity = 0.8 + total_energy * 0.2; // Entre 0.8 et 1.0
+                        if dist_sq <= radius_sq {
+                            // Facteur d'atténuation basé sur la distance
+                            let attenuation = (1.0 - dist_sq / radius_sq).max(0.0);
+                            let contrib = particle.temperature * attenuation;
 
-                    let spark_idx = spark_y * 128 + spark_x;
-                    if spark_idx < temperature.len() {
-                        temperature[spark_idx] = intensity;
+                            let idx = (y * 128 + x) as usize;
+                            temperature_buffer[idx] = temperature_buffer[idx].max(contrib);
+                        }
                     }
                 }
             }
         }
 
-        // Simuler la propagation de la chaleur de bas en haut
-        for y in (0..127).rev() {
-            // Calculer un facteur de propagation qui diminue avec la hauteur
-            // et qui est fortement influencé par l'intensité sonore
-            let height_factor = 1.0 - (127.0 - y as f32) / max_flame_height;
-
-            // Propagation plus agressive quand le son est fort
-            let propagation_factor = if height_factor > 0.0 {
-                // Entre 0.88 et 0.98 selon l'intensité sonore - plus réactif
-                0.88 + total_energy * 0.1
-            } else {
-                // Propagation plus forte même au-delà de la hauteur maximale si le son est fort
-                0.5 + total_energy * 0.2 // Entre 0.5 et 0.7
-            };
-
-            // Ajouter des pulsations basées sur l'intensité des basses
-            let bass_pulse = (self.animation_counter * 0.05).sin() * bass_energy * 0.05;
-
-            for x in 0..128 {
-                let idx = y * 128 + x;
-                let idx_below = (y + 1) * 128 + x;
-
-                // Propager la chaleur vers le haut avec diffusion
-                // Ajouter l'effet de pulsation des basses
-                let mut new_temp = temperature[idx_below] * (propagation_factor + bass_pulse);
-
-                // Ajouter de la diffusion latérale
-                if x > 0 {
-                    new_temp += temperature[idx_below - 1] * 0.05;
-                }
-                if x < 127 {
-                    new_temp += temperature[idx_below + 1] * 0.05;
-                }
-
-                // Ajouter un peu de mouvement aléatoire
-                // Plus d'agitation quand le son est fort
-                let wind_strength = 0.02 + total_energy * 0.05;
-                let wind = (self.animation_counter * 0.01).sin() * wind_strength + rand() * wind_strength;
-                let wind_x = (x as i32 + wind.signum() as i32).max(0).min(127) as usize;
-                let wind_idx = (y + 1) * 128 + wind_x;
-                if wind_idx < temperature.len() {
-                    new_temp += temperature[wind_idx] * wind.abs() * 5.0;
-                }
-
-                // Appliquer le refroidissement (beaucoup moins de refroidissement quand le son est détecté)
-                // Utiliser une fonction exponentielle pour réduire drastiquement le refroidissement même avec un son faible
-                let min_cooling_factor = 0.2; // Facteur minimal de refroidissement (20%)
-                let cooling_factor = min_cooling_factor + (1.0 - min_cooling_factor) * (1.0 - total_energy).powf(2.0);
-                let cooling = self.cooling_map[idx] * cooling_factor;
-
-                // Appliquer un plancher minimal de température pour maintenir des flammes visibles même avec un son très faible
-                let min_temp = if y > 100 { 0.1 } else { 0.0 }; // Maintenir un minimum de chaleur à la base
-                temperature[idx] = (new_temp - cooling).max(min_temp);
-            }
-        }
-
-        // Dessiner les flammes
+        // Convertir le buffer de température en couleurs
         for y in 0..128 {
             for x in 0..128 {
                 let idx = y * 128 + x;
-                let temp = temperature[idx];
+                let temperature = temperature_buffer[idx];
 
-                if temp > 0.01 {
-                    let (r, g, b) = self.get_flame_color(temp, x, y);
-                    let frame_idx = idx * 3;
+                if temperature > 0.01 {
+                    let age_factor = 1.0 - (y as f32 / 128.0); // Les flammes hautes sont plus "âgées"
+                    let (r, g, b) = self.get_flame_color(temperature, age_factor);
 
-                    frame[frame_idx] = (r * 255.0) as u8;
-                    frame[frame_idx + 1] = (g * 255.0) as u8;
-                    frame[frame_idx + 2] = (b * 255.0) as u8;
-                } else {
-                    // Pixel noir (fond)
                     let frame_idx = idx * 3;
-                    frame[frame_idx] = 0;
-                    frame[frame_idx + 1] = 0;
-                    frame[frame_idx + 2] = 0;
+                    frame[frame_idx] = (r * 255.0).clamp(0.0, 255.0) as u8;
+                    frame[frame_idx + 1] = (g * 255.0).clamp(0.0, 255.0) as u8;
+                    frame[frame_idx + 2] = (b * 255.0).clamp(0.0, 255.0) as u8;
                 }
             }
         }
@@ -1019,18 +1063,12 @@ impl Effect for Flames {
 
     fn set_color_mode(&mut self, mode: &str) {
         println!("🔥 [Flames] Setting color mode to '{}'", mode);
-        // Le mode de couleur est géré via GLOBAL_COLOR_CONFIG
     }
 
     fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
-        println!(
-            "🔥 [Flames] Setting custom color to ({:.2}, {:.2}, {:.2})",
-            r, g, b
-        );
-        // La couleur personnalisée est gérée via GLOBAL_COLOR_CONFIG
+        println!("🔥 [Flames] Setting custom color to ({:.2}, {:.2}, {:.2})", r, g, b);
     }
 }
-
 
 // Effet 5: Pluie
 struct Rain {
@@ -1617,42 +1655,179 @@ impl Effect for Applaudimetre {
     }
 }
 
-// Effet 7: Pluie d'Étoiles (Starfall)
+// Effet 7: Starfall
+use rand::Rng;
+use std::f32::consts::PI;
+
 pub struct Starfall {
-    stars: Vec<FallingStar>,
+    shooting_stars: Vec<ShootingStar>,
     animation_time: f32,
+    spawn_timer: f32,
+    rng: rand::rngs::ThreadRng,
 }
 
-struct FallingStar {
+struct ShootingStar {
+    // Position et mouvement
     x: f32,
     y: f32,
-    speed: f32,
+    velocity_x: f32,
+    velocity_y: f32,
+
+    // Apparence
     brightness: f32,
     size: f32,
     color: (f32, f32, f32),
-    trail_length: f32,
+
+    // Traînée
+    trail_points: Vec<TrailPoint>,
+    max_trail_length: usize,
+
+    // Durée de vie
+    age: f32,
+    max_age: f32,
+
+    // Effet de scintillement
+    twinkle_phase: f32,
+    twinkle_speed: f32,
+}
+
+#[derive(Clone)]
+struct TrailPoint {
+    x: f32,
+    y: f32,
+    intensity: f32,
+    age: f32,
+}
+
+impl ShootingStar {
+    fn new(spawn_side: SpawnSide, sound_intensity: f32, rng: &mut rand::rngs::ThreadRng) -> Self {
+        let (start_x, start_y, vel_x, vel_y) = match spawn_side {
+            SpawnSide::TopLeft => {
+                let x = rng.gen_range(-30.0..-10.0);
+                let y = rng.gen_range(-30.0..50.0);
+                let vx = rng.gen_range(2.0..5.0) + sound_intensity * 3.0;
+                let vy = rng.gen_range(1.5..4.0) + sound_intensity * 2.0;
+                (x, y, vx, vy)
+            },
+            SpawnSide::TopRight => {
+                let x = rng.gen_range(138.0..158.0);
+                let y = rng.gen_range(-30.0..50.0);
+                let vx = rng.gen_range(-5.0..-2.0) - sound_intensity * 3.0;
+                let vy = rng.gen_range(1.5..4.0) + sound_intensity * 2.0;
+                (x, y, vx, vy)
+            },
+            SpawnSide::Top => {
+                let x = rng.gen_range(20.0..108.0);
+                let y = rng.gen_range(-40.0..-10.0);
+                let vx = rng.gen_range(-2.0..2.0);
+                let vy = rng.gen_range(3.0..6.0) + sound_intensity * 3.0;
+                (x, y, vx, vy)
+            },
+        };
+
+        // Couleurs d'étoiles réalistes
+        let star_temp = rng.gen_range(0.0..1.0);
+        let base_color = if star_temp < 0.1 {
+            // Étoiles bleues (très chaudes)
+            (0.7, 0.8, 1.0)
+        } else if star_temp < 0.3 {
+            // Étoiles blanches
+            (1.0, 1.0, 1.0)
+        } else if star_temp < 0.6 {
+            // Étoiles jaunes (comme le soleil)
+            (1.0, 1.0, 0.8)
+        } else if star_temp < 0.8 {
+            // Étoiles oranges
+            (1.0, 0.8, 0.6)
+        } else {
+            // Étoiles rouges (plus froides)
+            (1.0, 0.6, 0.4)
+        };
+
+        Self {
+            x: start_x,
+            y: start_y,
+            velocity_x: vel_x,
+            velocity_y: vel_y,
+            brightness: 0.6 + rng.gen_range(0.0..0.4) + sound_intensity * 0.3,
+            size: 1.0 + rng.gen_range(0.0..2.0) + sound_intensity * 1.5,
+            color: base_color,
+            trail_points: Vec::new(),
+            max_trail_length: (15 + (sound_intensity * 25.0) as usize).min(40),
+            age: 0.0,
+            max_age: 120.0 + rng.gen_range(0.0..60.0),
+            twinkle_phase: rng.gen::<f32>() * 2.0 * PI,
+            twinkle_speed: 0.1 + rng.gen_range(0.0..0.2),
+        }
+    }
+
+    fn update(&mut self, time: f32) {
+        self.age += 1.0;
+        self.twinkle_phase += self.twinkle_speed;
+
+        // Ajouter le point actuel à la traînée
+        self.trail_points.push(TrailPoint {
+            x: self.x,
+            y: self.y,
+            intensity: self.brightness,
+            age: 0.0,
+        });
+
+        // Limiter la longueur de la traînée
+        if self.trail_points.len() > self.max_trail_length {
+            self.trail_points.remove(0);
+        }
+
+        // Vieillir les points de la traînée
+        for point in &mut self.trail_points {
+            point.age += 1.0;
+            point.intensity *= 0.95; // Décroissance de l'intensité
+        }
+
+        // Mouvement de l'étoile
+        self.x += self.velocity_x;
+        self.y += self.velocity_y;
+
+        // Légère accélération gravitationnelle
+        self.velocity_y += 0.05;
+
+        // Turbulence atmosphérique légère
+        self.velocity_x += (time * 0.1 + self.twinkle_phase).sin() * 0.1;
+        self.velocity_y += (time * 0.08 + self.twinkle_phase * 1.3).cos() * 0.05;
+
+        // Diminution progressive de la luminosité (burnout)
+        if self.age > self.max_age * 0.7 {
+            let fade_factor = 1.0 - (self.age - self.max_age * 0.7) / (self.max_age * 0.3);
+            self.brightness *= fade_factor.max(0.0);
+        }
+    }
+
+    fn is_alive(&self) -> bool {
+        self.age < self.max_age &&
+        self.brightness > 0.01 &&
+        self.x > -50.0 && self.x < 178.0 &&
+        self.y > -50.0 && self.y < 178.0
+    }
+
+    fn get_twinkle_factor(&self) -> f32 {
+        0.7 + 0.3 * (self.twinkle_phase.sin() * 0.5 + 0.5)
+    }
+}
+
+#[derive(Clone)]
+enum SpawnSide {
+    TopLeft,
+    TopRight,
+    Top,
 }
 
 impl Starfall {
     pub fn new() -> Self {
-        let mut stars = Vec::new();
-
-        // Créer quelques étoiles initiales
-        for _ in 0..20 {
-            stars.push(FallingStar {
-                x: rand() * 150.0 - 20.0,  // Commencer un peu à gauche
-                y: rand() * 150.0 - 20.0,  // Commencer un peu en haut
-                speed: 1.0 + rand() * 2.0,
-                brightness: 0.3 + rand() * 0.7,
-                size: 1.0 + rand() * 2.0,
-                color: (0.8 + rand() * 0.2, 0.8 + rand() * 0.2, 1.0), // Blanc-bleu
-                trail_length: 3.0 + rand() * 5.0,
-            });
-        }
-
         Self {
-            stars,
+            shooting_stars: Vec::new(),
             animation_time: 0.0,
+            spawn_timer: 0.0,
+            rng: rand::thread_rng(),
         }
     }
 
@@ -1661,35 +1836,66 @@ impl Starfall {
 
         match color_mode.mode.as_str() {
             "rainbow" => {
-                // Couleurs arc-en-ciel qui changent avec le temps
-                let hue = (self.animation_time * 0.01 + brightness) % 1.0;
-                hsv_to_rgb(hue, 0.8, brightness)
-            }
+                let hue = (self.animation_time * 0.005 + brightness) % 1.0;
+                hsv_to_rgb(hue, 0.7, brightness)
+            },
             "fire" => {
-                // Étoiles de feu (rouge-orange-jaune)
-                let intensity = brightness;
-                if intensity < 0.5 {
-                    (intensity * 2.0, intensity * 0.5, 0.0)
+                // Étoiles filantes de feu
+                if brightness < 0.3 {
+                    (brightness * 3.0, brightness * 0.5, 0.0)
+                } else if brightness < 0.7 {
+                    (1.0, (brightness - 0.3) * 2.5, 0.0)
                 } else {
-                    (1.0, 0.5 + (intensity - 0.5), (intensity - 0.5) * 0.5)
+                    (1.0, 1.0, (brightness - 0.7) * 3.0)
                 }
-            }
+            },
             "ocean" => {
-                // Étoiles océan (bleu-cyan)
-                (brightness * 0.2, brightness * 0.7, brightness)
-            }
+                // Étoiles filantes d'océan
+                (brightness * 0.3, brightness * 0.8, brightness)
+            },
             "sunset" => {
-                // Étoiles coucher de soleil (orange-rose)
-                (brightness, brightness * 0.6, brightness * 0.8)
-            }
+                // Étoiles filantes coucher de soleil
+                let warm_factor = brightness.powf(0.8);
+                (warm_factor, warm_factor * 0.7, warm_factor * 0.9)
+            },
             "custom" => {
                 let (r, g, b) = color_mode.custom_color;
                 (r * brightness, g * brightness, b * brightness)
-            }
+            },
             _ => {
-                // Blanc-bleu par défaut
+                // Couleurs réalistes d'étoiles
                 (base_color.0 * brightness, base_color.1 * brightness, base_color.2 * brightness)
             }
+        }
+    }
+
+    fn spawn_shooting_star(&mut self, sound_intensity: f32) {
+        // Choisir un côté de spawn aléatoire
+        let spawn_side = match self.rng.gen_range(0..3) {
+            0 => SpawnSide::TopLeft,
+            1 => SpawnSide::TopRight,
+            _ => SpawnSide::Top,
+        };
+
+        let star = ShootingStar::new(spawn_side, sound_intensity, &mut self.rng);
+        self.shooting_stars.push(star);
+    }
+
+    fn create_meteor_shower(&mut self, intensity: f32) {
+        // Pluie de météores intense
+        let meteor_count = (intensity * 8.0) as usize;
+        for _ in 0..meteor_count {
+            // Tous viennent du même quadrant pour un effet de pluie
+            let spawn_side = SpawnSide::TopLeft;
+            let mut star = ShootingStar::new(spawn_side, intensity, &mut self.rng);
+
+            // Météores plus rapides et plus brillants
+            star.velocity_x *= 1.5;
+            star.velocity_y *= 1.5;
+            star.brightness *= 1.3;
+            star.max_trail_length *= 2;
+
+            self.shooting_stars.push(star);
         }
     }
 }
@@ -1697,206 +1903,166 @@ impl Starfall {
 impl Effect for Starfall {
     fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
         // Analyser l'intensité sonore
-        let bass_energy = spectrum[..8].iter().sum::<f32>() / 8.0;
-        let mid_energy = spectrum[8..24].iter().sum::<f32>() / 16.0;
-        let high_energy = spectrum[24..].iter().sum::<f32>() / 40.0;
+        let bass_energy = (spectrum[..8].iter().sum::<f32>() / 8.0) * 4.0;
+        let mid_energy = (spectrum[8..24].iter().sum::<f32>() / 16.0) * 3.0;
+        let high_energy = (spectrum[24..].iter().sum::<f32>() / 40.0) * 2.0;
 
-        // Amplifier la sensibilité
-        let sensitivity = 4.0;
-        let bass = (bass_energy * sensitivity).min(1.0);
-        let mid = (mid_energy * sensitivity).min(1.0);
-        let high = (high_energy * sensitivity).min(1.0);
+        // Intensité totale pondérée
+        let total_energy = (bass_energy * 0.3 + mid_energy * 0.4 + high_energy * 0.3).clamp(0.0, 1.0);
 
-        // Intensité totale pour contrôler le nombre d'étoiles
-        let total_energy = (bass * 0.4 + mid * 0.4 + high * 0.2).min(1.0);
-
-        self.animation_time += 0.5;
-
-        // Effacer l'écran
-        frame.fill(0);
-
-        // Mettre à jour les étoiles existantes
-        let mut i = 0;
-        while i < self.stars.len() {
-            let star = &mut self.stars[i];
-
-            // Mouvement diagonal (haut-gauche vers bas-droit)
-            star.x += star.speed * 0.7;  // Mouvement horizontal
-            star.y += star.speed;        // Mouvement vertical (plus rapide)
-
-            // Ajouter un peu de variation basée sur l'audio
-            if total_energy > 0.1 {
-                star.x += (rand() - 0.5) * total_energy * 0.5;
-                star.y += total_energy * 0.3;
-            }
-
-            // Supprimer les étoiles qui sortent de l'écran
-            if star.x > 150.0 || star.y > 150.0 {
-                self.stars.swap_remove(i);
-            } else {
-                i += 1;
-            }
+        // Debug de l'intensité
+        if total_energy > 0.02 {
+            println!("⭐ [Starfall] Energy: {:.3}, Stars: {}", total_energy, self.shooting_stars.len());
         }
 
-        // Ajouter de nouvelles étoiles selon l'intensité sonore
-        let base_spawn_chance = 0.1;
-        let audio_spawn_boost = total_energy * 0.8;  // Jusqu'à 80% de chance supplémentaire
-        let spawn_chance = base_spawn_chance + audio_spawn_boost;
+        self.animation_time += 1.0;
+        self.spawn_timer += 1.0;
 
-        if rand() < spawn_chance {
-            // Nombre d'étoiles à créer (plus de son = plus d'étoiles)
-            let star_count = (1.0 + total_energy * 5.0) as usize;  // 1 à 6 étoiles
+        // Gestion du spawn d'étoiles avec espacement approprié
+        let base_spawn_interval = 45.0; // Frames entre les spawns (3/4 de seconde à 60fps)
+        let min_spawn_interval = 8.0;   // Interval minimal pour éviter le spam
+
+        let spawn_interval = base_spawn_interval - (total_energy * (base_spawn_interval - min_spawn_interval));
+
+        if self.spawn_timer >= spawn_interval {
+            self.spawn_timer = 0.0;
+
+            // Nombre d'étoiles à spawner
+            let star_count = if total_energy > 0.7 {
+                2 + (total_energy * 3.0) as usize // 2-5 étoiles pour l'audio fort
+            } else if total_energy > 0.3 {
+                1 + (total_energy * 2.0) as usize // 1-2 étoiles pour l'audio moyen
+            } else {
+                1 // 1 étoile pour l'audio faible
+            };
 
             for _ in 0..star_count {
-                if self.stars.len() < 150 {  // Limite pour éviter la surcharge
-                    // Spawn en haut à gauche avec un peu de variation
-                    let spawn_x = -20.0 + rand() * 40.0;  // Entre -20 et 20
-                    let spawn_y = -20.0 + rand() * 40.0;  // Entre -20 et 20
-
-                    // Vitesse influencée par l'audio
-                    let base_speed = 1.0 + rand() * 2.0;
-                    let audio_speed_boost = total_energy * 2.0;
-                    let final_speed = base_speed + audio_speed_boost;
-
-                    // Taille et luminosité influencées par l'audio
-                    let size = 1.0 + rand() * 1.5 + total_energy * 2.0;
-                    let brightness = 0.4 + rand() * 0.4 + total_energy * 0.2;
-
-                    // Couleur de base (blanc-bleu étoilé)
-                    let base_color = (
-                        0.8 + rand() * 0.2,
-                        0.8 + rand() * 0.2,
-                        1.0
-                    );
-
-                    // Traînée plus longue avec plus de son
-                    let trail = 3.0 + rand() * 4.0 + total_energy * 5.0;
-
-                    self.stars.push(FallingStar {
-                        x: spawn_x,
-                        y: spawn_y,
-                        speed: final_speed,
-                        brightness,
-                        size,
-                        color: base_color,
-                        trail_length: trail,
-                    });
+                if self.shooting_stars.len() < 25 { // Limite pour les performances
+                    self.spawn_shooting_star(total_energy);
                 }
             }
         }
 
-        // Log de débogage
-        static mut STARFALL_FRAME_COUNT: u64 = 0;
-        unsafe {
-            STARFALL_FRAME_COUNT += 1;
-            if STARFALL_FRAME_COUNT % 60 == 0 && total_energy > 0.01 {
-                println!(
-                    "⭐ [Starfall] Energy: {:.2}, Stars: {}, Spawn: {:.0}%",
-                    total_energy,
-                    self.stars.len(),
-                    spawn_chance * 100.0
-                );
-            }
+        // Créer une pluie de météores lors de pics sonores très intenses
+        if total_energy > 0.85 && self.rng.gen::<f32>() < 0.1 {
+            self.create_meteor_shower(total_energy);
         }
 
-        // Dessiner les étoiles avec leurs traînées
-        for star in &self.stars {
-            // Dessiner la traînée (points derrière l'étoile)
-            let trail_points = (star.trail_length * star.brightness) as usize;
-            for i in 0..trail_points {
-                let trail_factor = i as f32 / trail_points as f32;
+        // Mettre à jour toutes les étoiles
+        for star in &mut self.shooting_stars {
+            star.update(self.animation_time);
+        }
 
-                // Position de la traînée (inverse du mouvement)
-                let trail_x = star.x - star.speed * 0.7 * trail_factor * 1.5;
-                let trail_y = star.y - star.speed * trail_factor * 1.5;
+        // Supprimer les étoiles mortes
+        self.shooting_stars.retain(|star| star.is_alive());
 
-                let x = trail_x as i32;
-                let y = trail_y as i32;
+        // Effacer l'écran avec un fond d'espace profond
+        frame.fill(0);
 
-                if x >= 0 && x < 128 && y >= 0 && y < 128 {
-                    let idx = (y as usize * 128 + x as usize) * 3;
-                    if idx + 2 < frame.len() {
-                        // Intensité de la traînée diminue vers l'arrière
-                        let trail_intensity = star.brightness * (1.0 - trail_factor) * 0.4;
-                        let (r, g, b) = self.get_star_color(star.color, trail_intensity);
+        // Dessiner toutes les étoiles filantes
+        for star in &self.shooting_stars {
+            let twinkle = star.get_twinkle_factor();
 
-                        frame[idx] = (r * 255.0) as u8;
-                        frame[idx + 1] = (g * 255.0) as u8;
-                        frame[idx + 2] = (b * 255.0) as u8;
+            // Dessiner la traînée en premier (derrière l'étoile)
+            for (i, trail_point) in star.trail_points.iter().enumerate() {
+                if trail_point.intensity > 0.05 {
+                    let trail_age_factor = 1.0 - (i as f32 / star.trail_points.len() as f32);
+                    let trail_brightness = trail_point.intensity * trail_age_factor * 0.6;
+
+                    let px = trail_point.x as i32;
+                    let py = trail_point.y as i32;
+
+                    if px >= 0 && px < 128 && py >= 0 && py < 128 {
+                        let idx = (py as usize * 128 + px as usize) * 3;
+                        if idx + 2 < frame.len() {
+                            let (r, g, b) = self.get_star_color(star.color, trail_brightness);
+
+                            frame[idx] = ((r * 255.0) as u8).saturating_add(frame[idx]);
+                            frame[idx + 1] = ((g * 255.0) as u8).saturating_add(frame[idx + 1]);
+                            frame[idx + 2] = ((b * 255.0) as u8).saturating_add(frame[idx + 2]);
+                        }
                     }
                 }
             }
 
-            // Dessiner l'étoile principale (plus brillante)
-            let star_size = star.size as i32;
-            for dy in -star_size..=star_size {
-                for dx in -star_size..=star_size {
-                    let x = star.x as i32 + dx;
-                    let y = star.y as i32 + dy;
+            // Dessiner l'étoile principale
+            let star_brightness = star.brightness * twinkle;
+            let star_size = star.size;
+
+            // Cœur brillant de l'étoile
+            let center_x = star.x as i32;
+            let center_y = star.y as i32;
+
+            // Dessiner avec anti-aliasing
+            for dy in -(star_size as i32 + 1)..=(star_size as i32 + 1) {
+                for dx in -(star_size as i32 + 1)..=(star_size as i32 + 1) {
+                    let x = center_x + dx;
+                    let y = center_y + dy;
 
                     if x >= 0 && x < 128 && y >= 0 && y < 128 {
                         let distance = ((dx * dx + dy * dy) as f32).sqrt();
 
-                        // Forme d'étoile simple (plus brillant au centre)
-                        if distance <= star.size {
+                        let mut intensity = 0.0;
+
+                        // Cœur brillant
+                        if distance <= star_size {
+                            let core_falloff = (1.0 - distance / star_size).max(0.0);
+                            intensity = star_brightness * core_falloff;
+                        }
+                        // Halo externe
+                        else if distance <= star_size + 1.0 {
+                            let halo_falloff = (1.0 - (distance - star_size)).max(0.0);
+                            intensity = star_brightness * halo_falloff * 0.3;
+                        }
+
+                        if intensity > 0.01 {
                             let idx = (y as usize * 128 + x as usize) * 3;
                             if idx + 2 < frame.len() {
-                                // Intensité diminue du centre vers les bords
-                                let center_falloff = (1.0 - distance / star.size).max(0.0);
-                                let final_brightness = star.brightness * center_falloff;
+                                let (r, g, b) = self.get_star_color(star.color, intensity);
 
-                                let (r, g, b) = self.get_star_color(star.color, final_brightness);
-
-                                // Additive blending pour un effet lumineux
                                 frame[idx] = ((r * 255.0) as u8).saturating_add(frame[idx]);
                                 frame[idx + 1] = ((g * 255.0) as u8).saturating_add(frame[idx + 1]);
                                 frame[idx + 2] = ((b * 255.0) as u8).saturating_add(frame[idx + 2]);
                             }
                         }
-
-                        // Ajouter des "rayons" d'étoile (croix)
-                        if (dx == 0 && dy.abs() <= star_size + 1) || (dy == 0 && dx.abs() <= star_size + 1) {
-                            let idx = (y as usize * 128 + x as usize) * 3;
-                            if idx + 2 < frame.len() {
-                                let ray_brightness = star.brightness * 0.6;
-                                let (r, g, b) = self.get_star_color(star.color, ray_brightness);
-
-                                frame[idx] = ((r * 150.0) as u8).saturating_add(frame[idx]);
-                                frame[idx + 1] = ((g * 150.0) as u8).saturating_add(frame[idx + 1]);
-                                frame[idx + 2] = ((b * 150.0) as u8).saturating_add(frame[idx + 2]);
-                            }
-                        }
                     }
                 }
             }
-        }
 
-        // Effet d'explosion d'étoiles lors de pics sonores très forts
-        if total_energy > 0.8 && rand() < 0.2 {
-            // Créer une "supernova" temporaire
-            for _ in 0..8 {
-                let explosion_x = 20.0 + rand() * 88.0;  // Position aléatoire sur l'écran
-                let explosion_y = 20.0 + rand() * 88.0;
+            // Ajouter des rayons en croix pour les étoiles brillantes
+            if star_brightness > 0.7 {
+                let ray_length = (star_size * 1.5) as i32;
+                let ray_brightness = star_brightness * 0.4;
 
-                // Dessiner une explosion étoilée
-                for ray in 0..8 {
-                    let angle = (ray as f32 / 8.0) * 6.28;
-                    let length = 5.0 + rand() * 10.0;
+                // Rayons horizontaux et verticaux
+                for offset in -ray_length..=ray_length {
+                    // Rayon horizontal
+                    let hx = center_x + offset;
+                    let hy = center_y;
+                    if hx >= 0 && hx < 128 && hy >= 0 && hy < 128 {
+                        let idx = (hy as usize * 128 + hx as usize) * 3;
+                        if idx + 2 < frame.len() {
+                            let ray_intensity = ray_brightness * (1.0 - offset.abs() as f32 / ray_length as f32);
+                            let (r, g, b) = self.get_star_color(star.color, ray_intensity);
 
-                    for step in 0..(length as i32) {
-                        let x = (explosion_x + angle.cos() * step as f32) as i32;
-                        let y = (explosion_y + angle.sin() * step as f32) as i32;
+                            frame[idx] = ((r * 128.0) as u8).saturating_add(frame[idx]);
+                            frame[idx + 1] = ((g * 128.0) as u8).saturating_add(frame[idx + 1]);
+                            frame[idx + 2] = ((b * 128.0) as u8).saturating_add(frame[idx + 2]);
+                        }
+                    }
 
-                        if x >= 0 && x < 128 && y >= 0 && y < 128 {
-                            let idx = (y as usize * 128 + x as usize) * 3;
-                            if idx + 2 < frame.len() {
-                                let explosion_brightness = (1.0 - step as f32 / length) * total_energy;
-                                let (r, g, b) = self.get_star_color((1.0, 1.0, 1.0), explosion_brightness);
+                    // Rayon vertical
+                    let vx = center_x;
+                    let vy = center_y + offset;
+                    if vx >= 0 && vx < 128 && vy >= 0 && vy < 128 {
+                        let idx = (vy as usize * 128 + vx as usize) * 3;
+                        if idx + 2 < frame.len() {
+                            let ray_intensity = ray_brightness * (1.0 - offset.abs() as f32 / ray_length as f32);
+                            let (r, g, b) = self.get_star_color(star.color, ray_intensity);
 
-                                frame[idx] = ((r * 200.0) as u8).saturating_add(frame[idx]);
-                                frame[idx + 1] = ((g * 200.0) as u8).saturating_add(frame[idx + 1]);
-                                frame[idx + 2] = ((b * 200.0) as u8).saturating_add(frame[idx + 2]);
-                            }
+                            frame[idx] = ((r * 128.0) as u8).saturating_add(frame[idx]);
+                            frame[idx + 1] = ((g * 128.0) as u8).saturating_add(frame[idx + 1]);
+                            frame[idx + 2] = ((b * 128.0) as u8).saturating_add(frame[idx + 2]);
                         }
                     }
                 }
@@ -1909,13 +2075,9 @@ impl Effect for Starfall {
     }
 
     fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
-        println!(
-            "⭐ [Starfall] Custom color set to ({:.2}, {:.2}, {:.2})",
-            r, g, b
-        );
+        println!("⭐ [Starfall] Custom color set to ({:.2}, {:.2}, {:.2})", r, g, b);
     }
 }
-
 
 // Effet 8: Coeur Battant
 pub struct Heartbeat {
@@ -1984,11 +2146,12 @@ impl Heartbeat {
         }
     }
 
-    // Fonction pour dessiner un coeur mathematique
+    // Fonction pour dessiner un coeur mathematique (CORRIGÉE - orientation correcte)
     fn is_inside_heart(&self, x: f32, y: f32, center_x: f32, center_y: f32, scale: f32) -> f32 {
         // Normaliser les coordonnees par rapport au centre et a l'echelle
         let nx = (x - center_x) / scale;
-        let ny = (y - center_y) / scale;
+        // CORRECTION: Inverser l'axe Y pour que la pointe soit en bas
+        let ny = -(y - center_y) / scale;
 
         // Equation mathematique d'un coeur
         // (x^2 + y^2 - 1)^3 - x^2 * y^3 <= 0
