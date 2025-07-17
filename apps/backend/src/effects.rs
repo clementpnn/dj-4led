@@ -12,7 +12,6 @@ pub struct ColorConfig {
     pub custom_color: (f32, f32, f32),
 }
 
-// Global color config that will be used by all effects
 static mut GLOBAL_COLOR_CONFIG: ColorConfig = ColorConfig {
     mode: String::new(),
     custom_color: (1.0, 0.0, 0.5),
@@ -36,7 +35,6 @@ pub struct EffectEngine {
 
 impl EffectEngine {
     pub fn new() -> Self {
-        // Initialize global color config
         unsafe {
             GLOBAL_COLOR_CONFIG = ColorConfig::default();
         }
@@ -59,7 +57,6 @@ impl EffectEngine {
         if let Some(effect) = self.effects.get_mut(self.current) {
             effect.render(spectrum, &mut frame);
         } else {
-            println!("⚠️  No effect at index {}", self.current);
         }
 
         frame
@@ -68,51 +65,35 @@ impl EffectEngine {
     pub fn set_effect(&mut self, index: usize) {
         if index < self.effects.len() {
             self.current = index;
-            println!("✨ Changed to effect {}", index);
         } else {
-            println!(
-                "❌ Invalid effect index: {} (max: {})",
-                index,
-                self.effects.len() - 1
-            );
         }
     }
 
     pub fn set_color_mode(&mut self, mode: &str) {
-        println!("🎨 EffectEngine: Setting color mode to '{}'", mode);
         self.color_config.mode = mode.to_string();
 
-        // Update global config
         unsafe {
             GLOBAL_COLOR_CONFIG.mode = mode.to_string();
         }
 
         for (i, effect) in self.effects.iter_mut().enumerate() {
-            println!("   Setting color mode for effect {}", i);
             effect.set_color_mode(mode);
         }
     }
 
     pub fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
-        println!(
-            "🎨 EffectEngine: Setting custom color to ({:.2}, {:.2}, {:.2})",
-            r, g, b
-        );
         self.color_config.custom_color = (r, g, b);
 
-        // Update global config
         unsafe {
             GLOBAL_COLOR_CONFIG.custom_color = (r, g, b);
         }
 
         for (i, effect) in self.effects.iter_mut().enumerate() {
-            println!("   Setting custom color for effect {}", i);
             effect.set_custom_color(r, g, b);
         }
     }
 }
 
-// Effet 1: Barres de spectre
 pub struct SpectrumBars {
     smoothed: Vec<f32>,
     peak_hold: Vec<f32>,
@@ -142,12 +123,12 @@ impl SpectrumBars {
                 hsv_to_rgb(hue / 360.0, saturation.min(1.0), brightness)
             }
             "fire" => {
-                let hue = (bar as f32 / 64.0) * 60.0; // Rouge à jaune
+                let hue = (bar as f32 / 64.0) * 60.0;
                 let saturation = 1.0;
                 hsv_to_rgb(hue / 360.0, saturation, brightness)
             }
             "ocean" => {
-                let hue = 180.0 + (bar as f32 / 64.0) * 60.0; // Cyan à bleu
+                let hue = 180.0 + (bar as f32 / 64.0) * 60.0;
                 let saturation = 0.8
                     + if bar < self.smoothed.len() {
                         self.smoothed[bar] * 0.2
@@ -158,9 +139,9 @@ impl SpectrumBars {
             }
             "sunset" => {
                 let hue = if bar < 32 {
-                    300.0 + (bar as f32 / 32.0) * 60.0 // Violet à rouge
+                    300.0 + (bar as f32 / 32.0) * 60.0
                 } else {
-                    (bar as f32 - 32.0) / 32.0 * 60.0 // Rouge à jaune
+                    (bar as f32 - 32.0) / 32.0 * 60.0
                 };
                 hsv_to_rgb(hue / 360.0, 1.0, brightness)
             }
@@ -178,20 +159,16 @@ impl SpectrumBars {
 
 impl Effect for SpectrumBars {
     fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
-        // Lissage adaptatif : plus réactif pour les montées, plus lent pour les descentes
         for i in 0..64 {
             let target = spectrum[i];
             let current = self.smoothed[i];
 
             if target > current {
-                // Montée rapide
                 self.smoothed[i] = current * 0.4 + target * 0.6;
             } else {
-                // Descente lente pour un effet plus fluide
                 self.smoothed[i] = current * 0.85 + target * 0.15;
             }
 
-            // Gestion des peaks avec décroissance
             if self.smoothed[i] > self.peak_hold[i] {
                 self.peak_hold[i] = self.smoothed[i];
                 self.peak_decay[i] = 0.0;
@@ -201,68 +178,33 @@ impl Effect for SpectrumBars {
             }
         }
 
-        // Log de débogage moins fréquent
         static mut DEBUG_COUNTER: u32 = 0;
         unsafe {
             DEBUG_COUNTER += 1;
             if DEBUG_COUNTER % 50 == 0 {
                 let max_level = self.smoothed.iter().cloned().fold(0.0f32, f32::max);
-                if max_level > 0.01 {
-                    println!(
-                        "🎵 [SpectrumBars] Audio level: {:.2}, spectrum[0]: {:.2}",
-                        max_level, self.smoothed[0]
-                    );
-                }
             }
         }
 
-        // Log de débogage pour vérifier le mode de couleur
-        static mut FRAME_COUNT: u64 = 0;
-        unsafe {
-            FRAME_COUNT += 1;
-            if FRAME_COUNT % 60 == 0 {
-                println!(
-                    "🎨 [SpectrumBars] Current color mode: '{}', custom color: ({:.2}, {:.2}, {:.2})",
-                    GLOBAL_COLOR_CONFIG.mode,
-                    GLOBAL_COLOR_CONFIG.custom_color.0,
-                    GLOBAL_COLOR_CONFIG.custom_color.1,
-                    GLOBAL_COLOR_CONFIG.custom_color.2
-                );
-            }
-        }
-
-        // Effacer l'écran
         frame.fill(0);
 
-        // Rendu parallèle
         frame.par_chunks_mut(3).enumerate().for_each(|(i, pixel)| {
             let x = (i % 128) as f32;
             let y = (i / 128) as f32;
 
-            // Effet miroir : afficher le spectre deux fois (32 barres + 32 barres en miroir)
             let bar = if x < 64.0 {
-                // Partie gauche : barres 0-31
                 (x * 32.0 / 64.0) as usize
             } else {
-                // Partie droite : barres 31-0 (miroir)
                 (31.0 - (x - 64.0) * 32.0 / 64.0) as usize
             };
 
             if bar < 32 {
-                // Hauteur avec courbe exponentielle pour un meilleur rendu
-                // Utiliser les 32 premières barres du spectre pour les deux côtés
                 let value = self.smoothed[bar.min(31)];
-                // Appliquer une courbe pour rendre les barres plus dynamiques
-                let curved_value = if value > 0.0 {
-                    value.powf(0.6) // Rend les valeurs moyennes plus visibles
-                } else {
-                    0.0
-                };
+                let curved_value = if value > 0.0 { value.powf(0.6) } else { 0.0 };
 
-                let height = curved_value * 120.0; // Légèrement moins que 128 pour éviter saturation
+                let height = curved_value * 120.0;
                 let peak_height = self.peak_hold[bar] * 120.0;
 
-                // Gradient vertical pour chaque barre
                 let bar_bottom = 128.0 - height;
                 let distance_from_bottom = (y - bar_bottom).max(0.0);
                 let gradient_factor = if y >= bar_bottom && y < 128.0 {
@@ -271,7 +213,6 @@ impl Effect for SpectrumBars {
                     0.0
                 };
 
-                // Dessiner la barre principale avec gradient
                 if y >= bar_bottom && y < 128.0 {
                     let brightness = gradient_factor;
                     let (r, g, b) = self.get_color_for_bar(bar, brightness);
@@ -280,7 +221,6 @@ impl Effect for SpectrumBars {
                     pixel[2] = (b * 255.0) as u8;
                 }
 
-                // Dessiner le peak (ligne fine en haut)
                 let peak_y = 128.0 - peak_height;
                 if (y - peak_y).abs() < 1.0 && peak_height > 5.0 {
                     let (r, g, b) = self.get_color_for_bar(bar, 0.8);
@@ -289,7 +229,6 @@ impl Effect for SpectrumBars {
                     pixel[2] = (b * 255.0 * 0.8) as u8;
                 }
 
-                // Ajouter une ligne de séparation subtile entre les barres
                 let bar_pos = if x < 64.0 {
                     x * 32.0 / 64.0
                 } else {
@@ -297,13 +236,11 @@ impl Effect for SpectrumBars {
                 };
                 let bar_boundary = (bar_pos - bar as f32).abs() * 64.0 / 32.0;
                 if bar_boundary > 1.8 && y >= bar_bottom && y < 128.0 {
-                    // Atténuer légèrement les bords pour créer une séparation visuelle
                     pixel[0] = (pixel[0] as f32 * 0.7) as u8;
                     pixel[1] = (pixel[1] as f32 * 0.7) as u8;
                     pixel[2] = (pixel[2] as f32 * 0.7) as u8;
                 }
 
-                // Ajouter une ligne centrale brillante pour séparer les deux moitiés
                 if (x - 64.0).abs() < 0.5 && y >= bar_bottom && y < 128.0 {
                     let (r, g, b) = self.get_color_for_bar(bar, 0.3);
                     pixel[0] = (r * 255.0) as u8;
@@ -314,21 +251,11 @@ impl Effect for SpectrumBars {
         });
     }
 
-    fn set_color_mode(&mut self, mode: &str) {
-        println!("   SpectrumBars: color mode set to '{}'", mode);
-        // Color mode is now set globally
-    }
+    fn set_color_mode(&mut self, mode: &str) {}
 
-    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
-        println!(
-            "   SpectrumBars: custom color set to ({:.2}, {:.2}, {:.2})",
-            r, g, b
-        );
-        // Custom color is now set globally
-    }
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {}
 }
 
-// Effet 2: Onde circulaire
 pub struct CircularWave {
     time: f32,
 }
@@ -391,36 +318,12 @@ impl CircularWave {
 
 impl Effect for CircularWave {
     fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
-        // Vitesse adaptative selon l'énergie
         let total_energy = spectrum.iter().sum::<f32>() / spectrum.len() as f32;
         self.time += 0.05 + total_energy * 0.2;
 
         let bass_energy = spectrum[..8].iter().sum::<f32>() / 8.0;
         let mid_energy = spectrum[8..24].iter().sum::<f32>() / 16.0;
         let high_energy = spectrum[24..].iter().sum::<f32>() / 40.0;
-
-        // Log de débogage
-        if bass_energy > 0.01 || mid_energy > 0.01 || high_energy > 0.01 {
-            println!(
-                "🌊 [CircularWave] Bass: {:.2}, Mid: {:.2}, High: {:.2}, Time: {:.1}",
-                bass_energy, mid_energy, high_energy, self.time
-            );
-        }
-
-        // Log de débogage pour vérifier le mode de couleur
-        static mut WAVE_FRAME_COUNT: u64 = 0;
-        unsafe {
-            WAVE_FRAME_COUNT += 1;
-            if WAVE_FRAME_COUNT % 60 == 0 {
-                println!(
-                    "🎨 [CircularWave] Current color mode: '{}', custom color: ({:.2}, {:.2}, {:.2})",
-                    GLOBAL_COLOR_CONFIG.mode,
-                    GLOBAL_COLOR_CONFIG.custom_color.0,
-                    GLOBAL_COLOR_CONFIG.custom_color.1,
-                    GLOBAL_COLOR_CONFIG.custom_color.2
-                );
-            }
-        }
 
         frame.par_chunks_mut(3).enumerate().for_each(|(i, pixel)| {
             let x = ((i % 128) as f32 - 64.0) / 64.0;
@@ -429,23 +332,18 @@ impl Effect for CircularWave {
             let dist = (x * x + y * y).sqrt();
             let angle = y.atan2(x);
 
-            // Vitesse des ondes modulée par l'audio
             let speed_mod = 1.0 + bass_energy * 3.0;
 
-            // Plusieurs ondes qui pulsent avec différentes fréquences
             let wave1 = ((dist * 20.0 - self.time * 8.0 * speed_mod).sin() + 1.0) / 2.0;
             let wave2 = ((dist * 10.0 - self.time * 4.0 * speed_mod).cos() + 1.0) / 2.0;
             let wave3 = ((dist * 5.0 - self.time * 2.0 * speed_mod).sin() + 1.0) / 2.0;
 
-            // Intensité de base même sans audio
-            let base_intensity = 0.3; // Intensité minimale pour voir l'effet
+            let base_intensity = 0.3;
             let audio_intensity =
                 wave1 * bass_energy * 2.0 + wave2 * mid_energy * 1.5 + wave3 * high_energy;
 
-            // Combiner intensité de base et audio
             let intensity = (base_intensity + audio_intensity).min(1.0);
 
-            // Créer un pattern visible même sans audio
             let wave_pattern = (wave1 * 0.4 + wave2 * 0.3 + wave3 * 0.3).min(1.0);
             let brightness = (base_intensity + intensity * wave_pattern).min(1.0);
 
@@ -458,21 +356,11 @@ impl Effect for CircularWave {
         });
     }
 
-    fn set_color_mode(&mut self, mode: &str) {
-        println!("   CircularWave: color mode set to '{}'", mode);
-        // Color mode is now set globally
-    }
+    fn set_color_mode(&mut self, mode: &str) {}
 
-    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
-        println!(
-            "   CircularWave: custom color set to ({:.2}, {:.2}, {:.2})",
-            r, g, b
-        );
-        // Custom color is now set globally
-    }
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {}
 }
 
-// Effet 3: Système de particules
 pub struct ParticleSystem {
     particles: Vec<Particle>,
 }
@@ -509,29 +397,29 @@ impl ParticleSystem {
                 } else if particle_index % 3 == 0 {
                     rand() * 0.1 // Rouge
                 } else if particle_index % 3 == 1 {
-                    0.3 + rand() * 0.3 // Vert-Bleu
+                    0.3 + rand() * 0.3
                 } else {
-                    0.7 + rand() * 0.3 // Violet
+                    0.7 + rand() * 0.3
                 };
                 hsv_to_rgb(hue, 1.0, 1.0)
             }
             "fire" => {
-                let hue = rand() * 0.15; // Rouge à jaune
+                let hue = rand() * 0.15;
                 let saturation = 0.8 + rand() * 0.2;
                 let brightness = 0.7 + rand() * 0.3;
                 hsv_to_rgb(hue, saturation, brightness)
             }
             "ocean" => {
-                let hue = 0.5 + rand() * 0.17; // Cyan à bleu
+                let hue = 0.5 + rand() * 0.17;
                 let saturation = 0.6 + rand() * 0.4;
                 let brightness = 0.6 + rand() * 0.4;
                 hsv_to_rgb(hue, saturation, brightness)
             }
             "sunset" => {
                 let hue = if rand() > 0.5 {
-                    0.833 + rand() * 0.167 // Violet à rouge
+                    0.833 + rand() * 0.167
                 } else {
-                    rand() * 0.167 // Rouge à jaune
+                    rand() * 0.167
                 };
                 hsv_to_rgb(hue, 1.0, 1.0)
             }
@@ -551,39 +439,11 @@ impl ParticleSystem {
 
 impl Effect for ParticleSystem {
     fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
-        // Analyser le spectre par bandes de fréquences
         let bass_energy = spectrum[..8].iter().sum::<f32>() / 8.0;
         let mid_energy = spectrum[8..24].iter().sum::<f32>() / 16.0;
         let high_energy = spectrum[24..].iter().sum::<f32>() / 40.0;
         let total_energy = (bass_energy + mid_energy + high_energy) / 3.0;
 
-        // Log de débogage
-        if total_energy > 0.01 {
-            println!(
-                "✨ [Particles] Bass: {:.2}, Mid: {:.2}, High: {:.2}, Particles: {}",
-                bass_energy,
-                mid_energy,
-                high_energy,
-                self.particles.len()
-            );
-        }
-
-        // Log de débogage pour vérifier le mode de couleur
-        static mut PARTICLE_FRAME_COUNT: u64 = 0;
-        unsafe {
-            PARTICLE_FRAME_COUNT += 1;
-            if PARTICLE_FRAME_COUNT % 60 == 0 {
-                println!(
-                    "🎨 [Particles] Current color mode: '{}', custom color: ({:.2}, {:.2}, {:.2})",
-                    GLOBAL_COLOR_CONFIG.mode,
-                    GLOBAL_COLOR_CONFIG.custom_color.0,
-                    GLOBAL_COLOR_CONFIG.custom_color.1,
-                    GLOBAL_COLOR_CONFIG.custom_color.2
-                );
-            }
-        }
-
-        // Toujours ajouter quelques particules pour avoir un effet visible
         let base_particles = if self.particles.len() < 100 { 2 } else { 0 };
         let audio_particles = if total_energy > 0.05 && self.particles.len() < 2000 {
             ((bass_energy * 50.0).min(20.0)
@@ -596,50 +456,39 @@ impl Effect for ParticleSystem {
         let num_particles = base_particles + audio_particles;
 
         for i in 0..num_particles {
-            // Position de spawn selon la fréquence ou aléatoire si pas d'audio
             let (spawn_x, spawn_y) = if i < base_particles {
-                // Particules de base : spawn aléatoire
                 (rand() * 128.0, 100.0 + rand() * 28.0)
             } else if i % 3 == 0 && bass_energy > 0.1 {
-                // Basses : depuis le bas
                 (rand() * 128.0, 120.0 + rand() * 8.0)
             } else if i % 3 == 1 && mid_energy > 0.1 {
-                // Mediums : depuis les côtés
                 if rand() > 0.5 {
                     (0.0 + rand() * 8.0, 64.0 + (rand() - 0.5) * 64.0)
                 } else {
                     (120.0 + rand() * 8.0, 64.0 + (rand() - 0.5) * 64.0)
                 }
             } else {
-                // Aigus ou par défaut : aléatoire
                 (rand() * 128.0, rand() * 128.0)
             };
 
-            // Vitesse selon la fréquence
             let (vx, vy) = if i < base_particles {
-                // Particules de base : mouvement lent
                 ((rand() - 0.5) * 5.0, -rand() * 8.0 - 2.0)
             } else if i % 3 == 0 {
-                // Basses : montée rapide
                 (
                     (rand() - 0.5) * bass_energy * 10.0,
                     -bass_energy * 15.0 - rand() * 5.0,
                 )
             } else if i % 3 == 1 {
-                // Mediums : mouvement horizontal
                 (
                     (rand() - 0.5) * mid_energy * 15.0,
                     (rand() - 0.5) * mid_energy * 10.0,
                 )
             } else {
-                // Aigus : explosion
                 (
                     (rand() - 0.5) * high_energy * 20.0,
                     (rand() - 0.5) * high_energy * 20.0,
                 )
             };
 
-            // Couleur selon le mode
             let color =
                 self.get_particle_color(i, base_particles, bass_energy, mid_energy, high_energy);
 
@@ -648,42 +497,34 @@ impl Effect for ParticleSystem {
                 y: spawn_y,
                 vx,
                 vy,
-                life: 0.5 + total_energy * 0.5, // Vie plus longue si fort
+                life: 0.5 + total_energy * 0.5,
                 color,
             });
         }
 
-        // Mise à jour des particules avec physique améliorée
         self.particles.retain_mut(|p| {
             p.x += p.vx;
             p.y += p.vy;
 
-            // Gravité variable selon l'énergie (moins de gravité si musique forte)
             p.vy += 0.3 - total_energy * 0.2;
 
-            // Friction adaptative
             let friction = 0.97 - total_energy * 0.02;
             p.vx *= friction;
             p.vy *= friction;
 
-            // Décroissance de vie plus lente si musique forte
             p.life -= 0.02 - total_energy * 0.01;
 
             p.life > 0.0 && p.x >= -5.0 && p.x < 133.0 && p.y >= -5.0 && p.y < 133.0
         });
 
-        // Effacer
         frame.fill(0);
 
-        // Dessiner les particules avec un effet de flou et trail
         for particle in &self.particles {
             let x = particle.x as i32;
             let y = particle.y as i32;
 
-            // Taille variable selon la vie restante
             let size = if particle.life > 0.7 { 2 } else { 1 };
 
-            // Dessiner la particule avec un halo
             for dy in -size..=size {
                 for dx in -size..=size {
                     let px = x + dx;
@@ -709,21 +550,11 @@ impl Effect for ParticleSystem {
         }
     }
 
-    fn set_color_mode(&mut self, mode: &str) {
-        println!("   ParticleSystem: color mode set to '{}'", mode);
-        // Color mode is now set globally
-    }
+    fn set_color_mode(&mut self, mode: &str) {}
 
-    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
-        println!(
-            "   ParticleSystem: custom color set to ({:.2}, {:.2}, {:.2})",
-            r, g, b
-        );
-        // Custom color is now set globally
-    }
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {}
 }
 
-// Helpers
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     let c = v * s;
     let x = c * (1.0 - ((h * 6.0) % 2.0 - 1.0).abs());
