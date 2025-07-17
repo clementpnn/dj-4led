@@ -32,12 +32,10 @@ impl UdpFrameProcessor {
         let mut packets = Vec::new();
         let mut current_sequence = sequence_base;
 
-        // Traiter la frame si elle a changé
         let frame_hash = Self::fast_hash(frame);
         if frame_hash != self.last_frame_hash || self.frame_counter % 60 == 0 {
             self.last_frame_hash = frame_hash;
 
-            // Downscale à 64x64 pour réduire la bande passante
             self.downscale_frame(frame, 128, 64, 64);
 
             let frame_data = FrameData {
@@ -49,7 +47,6 @@ impl UdpFrameProcessor {
 
             let payload = frame_data.to_payload();
 
-            // Essayer la compression si activée et utile
             let (final_payload, packet_type) = if use_compression && payload.len() > 1024 {
                 if let Some(compressed) = self.compress_data(&payload) {
                     if compressed.len() < payload.len() * 3 / 4 {
@@ -64,13 +61,10 @@ impl UdpFrameProcessor {
                 (payload, PacketType::FrameData)
             };
 
-            // Fragmenter si nécessaire
             if final_payload.len() <= MAX_PACKET_SIZE - 12 {
-                // Un seul paquet
                 packets.push(UdpPacket::new(packet_type, current_sequence, final_payload));
                 current_sequence = current_sequence.wrapping_add(1);
             } else {
-                // Fragmenter en plusieurs paquets
                 let chunk_size = MAX_PACKET_SIZE - 12;
                 let chunks: Vec<_> = final_payload.chunks(chunk_size).collect();
                 let fragment_count = chunks.len() as u16;
@@ -92,12 +86,10 @@ impl UdpFrameProcessor {
             }
         }
 
-        // Traiter le spectre si il a changé
         let spectrum_hash = Self::fast_hash_f32(spectrum);
         if spectrum_hash != self.last_spectrum_hash {
             self.last_spectrum_hash = spectrum_hash;
 
-            // Réduire le spectre à 32 bandes pour économiser la bande passante
             let reduced_spectrum = Self::reduce_spectrum(spectrum, 32);
 
             let spectrum_data = SpectrumData {
@@ -116,7 +108,6 @@ impl UdpFrameProcessor {
         packets
     }
 
-    // Hash rapide pour détecter les changements
     fn fast_hash(data: &[u8]) -> u64 {
         data.chunks(8).enumerate().fold(0u64, |acc, (i, chunk)| {
             let mut bytes = [0u8; 8];
@@ -132,7 +123,6 @@ impl UdpFrameProcessor {
         })
     }
 
-    // Downscale optimisé pour réduire la résolution
     fn downscale_frame(
         &mut self,
         src: &[u8],
@@ -143,7 +133,6 @@ impl UdpFrameProcessor {
         self.frame_buffer.clear();
         let scale = src_width / dst_width;
 
-        // Version optimisée avec moins d'accès mémoire
         self.frame_buffer.reserve_exact(dst_width * dst_height * 3);
 
         for y in 0..dst_height {
@@ -154,7 +143,6 @@ impl UdpFrameProcessor {
 
                 if src_idx + 2 < src.len() {
                     unsafe {
-                        // Utilisation de pointeurs pour éviter les bounds checks
                         let ptr = src.as_ptr().add(src_idx);
                         self.frame_buffer.push(*ptr);
                         self.frame_buffer.push(*ptr.add(1));
@@ -167,7 +155,6 @@ impl UdpFrameProcessor {
         }
     }
 
-    // Compression rapide avec gzip
     fn compress_data(&mut self, data: &[u8]) -> Option<Vec<u8>> {
         self.compression_buffer.clear();
 
@@ -180,7 +167,6 @@ impl UdpFrameProcessor {
         }
     }
 
-    // Réduction du spectre audio
     fn reduce_spectrum(spectrum: &[f32], target_bands: usize) -> Vec<f32> {
         if spectrum.len() <= target_bands {
             return spectrum.to_vec();
@@ -197,11 +183,9 @@ impl UdpFrameProcessor {
                 (i + 1) * bin_size
             };
 
-            // Moyenne des valeurs dans chaque bande
             let sum: f32 = spectrum[start..end].iter().sum();
             let avg = sum / (end - start) as f32;
 
-            // Arrondir à 2 décimales pour réduire la taille
             reduced.push((avg * 100.0).round() / 100.0);
         }
 
@@ -230,15 +214,14 @@ mod tests {
         let reduced = UdpFrameProcessor::reduce_spectrum(&spectrum, 32);
 
         assert_eq!(reduced.len(), 32);
-        // Vérifier que les valeurs sont moyennées correctement
-        assert_eq!(reduced[0], 1.5); // Moyenne de 0,1,2,3
-        assert_eq!(reduced[1], 5.5); // Moyenne de 4,5,6,7
+        assert_eq!(reduced[0], 1.5);
+        assert_eq!(reduced[1], 5.5);
     }
 
     #[test]
     fn test_compression() {
         let mut processor = UdpFrameProcessor::new();
-        let data = vec![0u8; 1024]; // Données très compressibles
+        let data = vec![0u8; 1024];
 
         let compressed = processor.compress_data(&data);
         assert!(compressed.is_some());

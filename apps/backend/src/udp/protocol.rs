@@ -1,10 +1,8 @@
 use anyhow::Result;
 use std::io::{Cursor, Read, Write};
 
-// Taille maximale d'un paquet UDP (MTU typique - headers IP/UDP)
 pub const MAX_PACKET_SIZE: usize = 1472;
 
-// Types de paquets
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PacketType {
@@ -36,7 +34,6 @@ impl PacketType {
     }
 }
 
-// Flags pour les options du paquet
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct PacketFlags: u8 {
@@ -48,7 +45,6 @@ bitflags::bitflags! {
     }
 }
 
-// Structure d'un paquet UDP
 #[derive(Debug, Clone)]
 pub struct UdpPacket {
     pub packet_type: PacketType,
@@ -109,12 +105,10 @@ impl UdpPacket {
         }
     }
 
-    // Sérialisation en bytes
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let mut buffer = Vec::with_capacity(16 + self.payload.len());
         let mut cursor = Cursor::new(&mut buffer);
 
-        // Header (12 bytes)
         cursor.write_all(&[self.packet_type as u8])?;
         cursor.write_all(&[self.flags.bits()])?;
         cursor.write_all(&self.sequence.to_le_bytes())?;
@@ -122,13 +116,11 @@ impl UdpPacket {
         cursor.write_all(&self.fragment_count.to_le_bytes())?;
         cursor.write_all(&(self.payload.len() as u16).to_le_bytes())?;
 
-        // Payload
         cursor.write_all(&self.payload)?;
 
         Ok(buffer)
     }
 
-    // Désérialisation depuis bytes
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         if data.len() < 12 {
             anyhow::bail!("Packet too small");
@@ -136,7 +128,6 @@ impl UdpPacket {
 
         let mut cursor = Cursor::new(data);
 
-        // Lire le header
         let mut type_byte = [0u8; 1];
         cursor.read_exact(&mut type_byte)?;
         let packet_type = PacketType::from_u8(type_byte[0])
@@ -162,7 +153,6 @@ impl UdpPacket {
         cursor.read_exact(&mut payload_len_bytes)?;
         let payload_len = u16::from_le_bytes(payload_len_bytes) as usize;
 
-        // Lire le payload
         let mut payload = vec![0u8; payload_len];
         cursor.read_exact(&mut payload)?;
 
@@ -177,7 +167,6 @@ impl UdpPacket {
     }
 }
 
-// Commandes possibles
 #[derive(Debug, Clone)]
 pub enum UdpCommand {
     SetEffect(usize),
@@ -190,24 +179,24 @@ impl UdpCommand {
     pub fn to_payload(&self) -> Vec<u8> {
         match self {
             Self::SetEffect(id) => {
-                let mut data = vec![0x01]; // Command ID
+                let mut data = vec![0x01];
                 data.extend_from_slice(&(*id as u32).to_le_bytes());
                 data
             }
             Self::SetColorMode(mode) => {
-                let mut data = vec![0x02]; // Command ID
+                let mut data = vec![0x02];
                 data.extend_from_slice(mode.as_bytes());
                 data
             }
             Self::SetCustomColor(r, g, b) => {
-                let mut data = vec![0x03]; // Command ID
+                let mut data = vec![0x03];
                 data.extend_from_slice(&r.to_le_bytes());
                 data.extend_from_slice(&g.to_le_bytes());
                 data.extend_from_slice(&b.to_le_bytes());
                 data
             }
             Self::SetParameter(name, value) => {
-                let mut data = vec![0x04]; // Command ID
+                let mut data = vec![0x04];
                 data.extend_from_slice(&(name.len() as u16).to_le_bytes());
                 data.extend_from_slice(name.as_bytes());
                 data.extend_from_slice(&(value.len() as u16).to_le_bytes());
@@ -273,7 +262,6 @@ impl UdpCommand {
     }
 }
 
-// Structure pour les données de frame
 #[derive(Debug, Clone)]
 pub struct FrameData {
     pub width: u16,
@@ -325,7 +313,6 @@ impl FrameData {
     }
 }
 
-// Structure pour les données de spectre
 #[derive(Debug, Clone)]
 pub struct SpectrumData {
     pub bands: Vec<f32>,

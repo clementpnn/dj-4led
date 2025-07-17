@@ -11,7 +11,6 @@ pub mod router;
 
 use protocol::{Entity, EntityRange};
 
-/// Contrôleur iHub optimisé pour la communication avec les LEDs
 pub struct IHubController {
     socket: UdpSocket,
     target_address: String,
@@ -19,7 +18,6 @@ pub struct IHubController {
     entities: HashMap<u16, Entity>,
     entity_ranges: Vec<EntityRange>,
     last_config_time: Instant,
-    // Optimisations
     send_buffer: Vec<u8>,
     compression_buffer: Vec<u8>,
     entity_buffer: Vec<(u16, Entity)>,
@@ -36,11 +34,10 @@ impl IHubController {
             socket,
             target_address: target_address.to_string(),
             universe,
-            entities: HashMap::with_capacity(20000), // Pré-allocation pour ~20k entités
+            entities: HashMap::with_capacity(20000),
             entity_ranges: Vec::with_capacity(64),
             last_config_time: Instant::now(),
-            // Buffers pré-alloués pour éviter les allocations répétées
-            send_buffer: Vec::with_capacity(65507), // Max UDP size
+            send_buffer: Vec::with_capacity(65507),
             compression_buffer: Vec::with_capacity(32768),
             entity_buffer: Vec::with_capacity(20000),
             dirty_entities: Vec::with_capacity(1000),
@@ -48,20 +45,17 @@ impl IHubController {
         })
     }
 
-    /// Configure les plages d'entités pour ce contrôleur
     pub fn configure_entities(&mut self, ranges: Vec<EntityRange>) {
         self.entity_ranges = ranges;
         self.send_config();
     }
 
-    /// Met à jour l'état des entités de manière optimisée
     pub fn update_entities(&mut self, entities: &[(u16, u8, u8, u8, u8)]) {
         self.dirty_entities.clear();
 
         for &(id, r, g, b, w) in entities {
             let entity = Entity::new_rgbw(id, r, g, b, w);
 
-            // Vérifier si l'entité a changé
             if let Some(existing) = self.entities.get(&id) {
                 if existing.r != r || existing.g != g || existing.b != b || existing.w != w {
                     self.entities.insert(id, entity);
@@ -73,7 +67,6 @@ impl IHubController {
             }
         }
 
-        // Envoyer seulement si des changements
         if !self.dirty_entities.is_empty() {
             if self.use_differential_updates && self.dirty_entities.len() < self.entities.len() / 4
             {
@@ -84,14 +77,11 @@ impl IHubController {
         }
     }
 
-    /// Envoie une mise à jour différentielle (seulement les entités modifiées)
     fn send_differential_update(&mut self) {
         self.compression_buffer.clear();
 
-        // Trier les entités modifiées pour un encodage optimal
         self.dirty_entities.sort_unstable();
 
-        // Encoder seulement les entités modifiées
         for &id in &self.dirty_entities {
             if let Some(entity) = self.entities.get(&id) {
                 self.compression_buffer
@@ -99,31 +89,26 @@ impl IHubController {
             }
         }
 
-        self.compress_and_send(3, self.dirty_entities.len() as u16); // Type 3 = differential update
+        self.compress_and_send(3, self.dirty_entities.len() as u16);
     }
 
-    /// Envoie une mise à jour complète
     fn send_full_update(&mut self) {
         self.compression_buffer.clear();
         self.entity_buffer.clear();
 
-        // Collecter et trier toutes les entités
         self.entity_buffer
             .extend(self.entities.iter().map(|(&id, entity)| (id, *entity)));
         self.entity_buffer.sort_unstable_by_key(|(id, _)| *id);
 
-        // Encoder toutes les entités
         for (_, entity) in &self.entity_buffer {
             self.compression_buffer
                 .extend_from_slice(&entity.to_sextet());
         }
 
-        self.compress_and_send(2, self.entity_buffer.len() as u16); // Type 2 = full update
+        self.compress_and_send(2, self.entity_buffer.len() as u16);
     }
 
-    /// Compresse et envoie les données
     fn compress_and_send(&mut self, msg_type: u8, entity_count: u16) {
-        // Compression avec niveau optimal pour la vitesse
         let mut encoder = GzEncoder::new(
             Vec::with_capacity(self.compression_buffer.len() / 2),
             Compression::fast(),
@@ -131,7 +116,6 @@ impl IHubController {
         encoder.write_all(&self.compression_buffer).unwrap();
         let compressed = encoder.finish().unwrap();
 
-        // Construire le message iHub
         self.send_buffer.clear();
         self.send_buffer.extend_from_slice(b"iHuB");
         self.send_buffer.push(msg_type);
@@ -142,15 +126,12 @@ impl IHubController {
             .extend_from_slice(&(compressed.len() as u16).to_le_bytes());
         self.send_buffer.extend_from_slice(&compressed);
 
-        // Envoyer via UDP non-bloquant
         let _ = self.socket.send_to(&self.send_buffer, &self.target_address);
     }
 
-    /// Envoie un message de configuration iHub
     fn send_config(&mut self) {
         self.compression_buffer.clear();
 
-        // Encoder chaque plage
         for range in &self.entity_ranges {
             self.compression_buffer
                 .extend_from_slice(&range.sextet_start.to_le_bytes());
@@ -162,7 +143,6 @@ impl IHubController {
                 .extend_from_slice(&range.entity_end.to_le_bytes());
         }
 
-        // Compresser
         let mut encoder = GzEncoder::new(
             Vec::with_capacity(self.compression_buffer.len()),
             Compression::fast(),
@@ -170,7 +150,6 @@ impl IHubController {
         encoder.write_all(&self.compression_buffer).unwrap();
         let compressed = encoder.finish().unwrap();
 
-        // Construire le message
         self.send_buffer.clear();
         self.send_buffer.extend_from_slice(b"iHuB");
         self.send_buffer.push(1); // Type: config
@@ -181,11 +160,9 @@ impl IHubController {
             .extend_from_slice(&(compressed.len() as u16).to_le_bytes());
         self.send_buffer.extend_from_slice(&compressed);
 
-        // Envoyer
         let _ = self.socket.send_to(&self.send_buffer, &self.target_address);
     }
 
-    /// Envoie périodiquement la configuration (1 fois par seconde)
     pub fn tick(&mut self) {
         if self.last_config_time.elapsed() >= Duration::from_secs(1) {
             self.send_config();
@@ -193,13 +170,11 @@ impl IHubController {
         }
     }
 
-    /// Active/désactive les mises à jour différentielles
     pub fn set_differential_updates(&mut self, enabled: bool) {
         self.use_differential_updates = enabled;
     }
 }
 
-/// Convertit un frame RGB en entités iHub pour l'écran LED de manière optimisée
 pub fn frame_to_entities_optimized(
     frame: &[u8],
     width: usize,
@@ -207,37 +182,30 @@ pub fn frame_to_entities_optimized(
     output: &mut Vec<(u16, u8, u8, u8, u8)>,
 ) {
     output.clear();
-    output.reserve(64 * 259); // Pré-allocation exacte
+    output.reserve(64 * 259);
 
-    // Table de lookup pour éviter les calculs répétés
     const QUARTER_BASES: [u16; 4] = [100, 5100, 10100, 15100];
 
-    // Optimisation: traiter par chunks pour améliorer la localité du cache
     for quarter in 0..4 {
         let base_entity = QUARTER_BASES[quarter];
         let quarter_x_offset = quarter * 32;
 
-        // 16 bandes physiques par quartier
         for band in 0..16 {
             let col_start = quarter_x_offset + band * 2;
             let entity_base = base_entity + (band as u16) * 300;
 
-            // Vérifier les limites une seule fois
             if col_start + 1 >= width {
                 continue;
             }
 
-            // LED 1 invisible
             output.push((entity_base, 0, 0, 0, 0));
 
-            // Bande montante (colonne paire) - LEDs 2-129
             let col1 = col_start;
             for i in 0..128 {
                 let y = height.saturating_sub(1 + i);
                 let pixel_idx = (y * width + col1) * 3;
 
                 if pixel_idx + 2 < frame.len() {
-                    // Accès direct sans bounds check supplémentaire
                     unsafe {
                         output.push((
                             entity_base + 1 + (i as u16),
@@ -250,10 +218,8 @@ pub fn frame_to_entities_optimized(
                 }
             }
 
-            // LED 130 invisible
             output.push((entity_base + 129, 0, 0, 0, 0));
 
-            // Bande descendante (colonne impaire) - LEDs 131-258
             let col2 = col_start + 1;
             for i in 0..128 {
                 let pixel_idx = (i * width + col2) * 3;
@@ -271,13 +237,11 @@ pub fn frame_to_entities_optimized(
                 }
             }
 
-            // LED 259 invisible
             output.push((entity_base + 258, 0, 0, 0, 0));
         }
     }
 }
 
-/// Version compatible avec l'ancienne API
 pub fn frame_to_entities(frame: &[u8], width: usize, height: usize) -> Vec<(u16, u8, u8, u8, u8)> {
     let mut entities = Vec::with_capacity(64 * 259);
     frame_to_entities_optimized(frame, width, height, &mut entities);
@@ -292,15 +256,12 @@ mod tests {
     fn test_differential_updates() {
         let mut controller = IHubController::new("127.0.0.1:8080", 0).unwrap();
 
-        // Ajouter quelques entités
         let entities = vec![(1, 255, 0, 0, 0), (2, 0, 255, 0, 0), (3, 0, 0, 255, 0)];
         controller.update_entities(&entities);
 
-        // Modifier seulement une entité
         let updates = vec![(2, 0, 128, 0, 0)];
         controller.update_entities(&updates);
 
-        // Vérifier que seulement l'entité modifiée est marquée
         assert_eq!(controller.dirty_entities.len(), 1);
         assert_eq!(controller.dirty_entities[0], 2);
     }
@@ -316,7 +277,6 @@ mod tests {
         }
         let duration = start.elapsed();
 
-        println!("Frame conversion (100 iterations): {:?}", duration);
-        assert!(duration.as_millis() < 100); // Devrait prendre moins de 100ms pour 100 iterations
+        assert!(duration.as_millis() < 100);
     }
 }

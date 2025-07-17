@@ -96,26 +96,17 @@ impl Config {
             match fs::read_to_string(config_path) {
                 Ok(contents) => match toml::from_str(&contents) {
                     Ok(config) => {
-                        println!("✅ Configuration loaded from {}", config_path);
                         return config;
                     }
-                    Err(e) => {
-                        eprintln!("❌ Error parsing config file: {}", e);
-                    }
+                    Err(e) => {}
                 },
-                Err(e) => {
-                    eprintln!("❌ Error reading config file: {}", e);
-                }
+                Err(e) => {}
             }
         }
 
-        println!("📝 Using default configuration");
         let default_config = Self::default();
 
-        // Save default config for reference
-        if let Err(e) = default_config.save() {
-            eprintln!("⚠️  Could not save default config: {}", e);
-        }
+        if let Err(e) = default_config.save() {}
 
         default_config
     }
@@ -123,7 +114,6 @@ impl Config {
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
         let toml = toml::to_string_pretty(self)?;
         fs::write("config.toml", toml)?;
-        println!("💾 Configuration saved to config.toml");
         Ok(())
     }
 
@@ -131,7 +121,7 @@ impl Config {
         Self {
             audio: AudioConfig {
                 sample_rate: 48000,
-                buffer_size: 128, // Slightly larger for stability
+                buffer_size: 128,
                 channels: 1,
                 device_name: None,
                 gain: 1.2,
@@ -144,7 +134,7 @@ impl Config {
                     "192.168.1.47:6454".to_string(),
                     "192.168.1.48:6454".to_string(),
                 ],
-                fps: 50, // Lower FPS for stability
+                fps: 50,
                 brightness: 0.9,
                 gamma_correction: 2.2,
                 color_temperature: 1.0,
@@ -154,7 +144,7 @@ impl Config {
                 bass_boost: 1.8,
                 mid_boost: 1.3,
                 high_boost: 1.1,
-                particle_limit: 1500, // Less particles for performance
+                particle_limit: 1500,
                 wave_speed: 1.2,
             },
             performance: PerformanceConfig {
@@ -170,7 +160,7 @@ impl Config {
         Self {
             audio: AudioConfig {
                 sample_rate: 44100,
-                buffer_size: 256, // Larger buffer for less CPU usage
+                buffer_size: 256,
                 channels: 1,
                 device_name: None,
                 gain: 1.0,
@@ -183,7 +173,7 @@ impl Config {
                     "192.168.1.47:6454".to_string(),
                     "192.168.1.48:6454".to_string(),
                 ],
-                fps: 30, // Lower FPS for performance
+                fps: 30,
                 brightness: 0.8,
                 gamma_correction: 2.0,
                 color_temperature: 1.0,
@@ -193,7 +183,7 @@ impl Config {
                 bass_boost: 1.5,
                 mid_boost: 1.1,
                 high_boost: 1.0,
-                particle_limit: 1000, // Less particles
+                particle_limit: 1000,
                 wave_speed: 1.0,
             },
             performance: PerformanceConfig {
@@ -206,7 +196,6 @@ impl Config {
     }
 }
 
-// Helper functions for runtime adjustments
 impl Config {
     pub fn apply_brightness(&self, color: &mut [u8; 3]) {
         color[0] = (color[0] as f32 * self.led.brightness) as u8;
@@ -223,12 +212,9 @@ impl Config {
 
     pub fn apply_color_temperature(&self, color: &mut [u8; 3]) {
         if self.led.color_temperature != 1.0 {
-            // Warm (< 1.0) or Cool (> 1.0) adjustment
             if self.led.color_temperature < 1.0 {
-                // Warmer - reduce blue
                 color[2] = (color[2] as f32 * self.led.color_temperature) as u8;
             } else {
-                // Cooler - reduce red
                 color[0] = (color[0] as f32 / self.led.color_temperature) as u8;
             }
         }

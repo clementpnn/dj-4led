@@ -28,34 +28,26 @@ struct ClientInfo {
 
 impl UdpServer {
     pub fn new(state: Arc<AppState>) -> Result<Self> {
-        println!("🔧 Creating UDP socket on 0.0.0.0:8081...");
         let socket = match UdpSocket::bind("0.0.0.0:8081") {
-            Ok(s) => {
-                println!("✅ UDP socket bound successfully");
-                s
-            }
+            Ok(s) => s,
             Err(e) => {
-                eprintln!("❌ Failed to bind UDP socket: {}", e);
                 return Err(e.into());
             }
         };
 
         match socket.set_nonblocking(true) {
-            Ok(_) => println!("✅ Socket set to non-blocking mode"),
+            Ok(_) => println!(""),
             Err(e) => {
-                eprintln!("❌ Failed to set non-blocking mode: {}", e);
                 return Err(e.into());
             }
         }
 
-        // Optimisations UDP pour Linux et macOS
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use std::os::unix::io::AsRawFd;
             let fd = socket.as_raw_fd();
             unsafe {
-                // Augmenter les buffers de réception/envoi
-                let size: libc::c_int = 2 * 1024 * 1024; // 2MB
+                let size: libc::c_int = 2 * 1024 * 1024;
                 libc::setsockopt(
                     fd,
                     libc::SOL_SOCKET,
@@ -81,22 +73,16 @@ impl UdpServer {
     }
 
     pub fn run(self) -> Result<()> {
-        println!("🚀 UDP server listening on udp://0.0.0.0:8081");
-
         let state = self.state.clone();
         let clients = self.clients.clone();
         let socket = self.socket.try_clone()?;
 
-        // Thread pour envoyer les données aux clients
-        thread::spawn(move || {
-            println!("📤 UDP sender thread started");
-            if let Err(e) = Self::sender_loop(socket, state, clients) {
-                eprintln!("UDP sender error: {}", e);
-            }
-        });
+        thread::spawn(
+            move || {
+                if let Err(e) = Self::sender_loop(socket, state, clients) {}
+            },
+        );
 
-        // Thread principal pour recevoir les commandes
-        println!("📥 Starting UDP receiver loop");
         self.receiver_loop()
     }
 
@@ -109,29 +95,19 @@ impl UdpServer {
         let mut last_cleanup = Instant::now();
         let mut stats = TransmissionStats::new();
 
-        println!("📡 UDP sender loop started");
-
         loop {
-            // Nettoyage périodique des clients inactifs
             if last_cleanup.elapsed() > Duration::from_secs(30) {
                 let mut clients_list = clients.lock();
                 clients_list.retain(|c| c.last_seen.elapsed() < Duration::from_secs(60));
                 last_cleanup = Instant::now();
             }
 
-            // Obtenir les données actuelles
             let frame = state.led_frame.lock().clone();
             let spectrum = state.spectrum.lock().clone();
 
-            // Traiter et envoyer aux clients actifs
             let clients_snapshot = clients.lock().clone();
 
-            if !clients_snapshot.is_empty() {
-                println!("📤 Sending to {} clients", clients_snapshot.len());
-            }
-
             for mut client in clients_snapshot {
-                // Préparer les paquets selon le type de client
                 let packets = processor.prepare_packets(
                     &frame,
                     &spectrum,
@@ -139,7 +115,6 @@ impl UdpServer {
                     client.compression_enabled,
                 );
 
-                // Envoyer les paquets
                 for packet in packets {
                     if let Ok(packet_data) = packet.to_bytes() {
                         match socket.send_to(&packet_data, client.addr) {
@@ -148,11 +123,9 @@ impl UdpServer {
                                 client.packet_counter = client.packet_counter.wrapping_add(1);
                             }
                             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                // Buffer plein, on skip ce client pour cette frame
                                 break;
                             }
                             Err(_) => {
-                                // Erreur réseau, on continue avec les autres clients
                                 break;
                             }
                         }
@@ -160,12 +133,10 @@ impl UdpServer {
                 }
             }
 
-            // Afficher les stats toutes les 10 secondes
             if stats.should_print() {
                 stats.print_and_reset();
             }
 
-            // Limiter à ~60 FPS
             thread::sleep(Duration::from_micros(16_666));
         }
     }
@@ -175,41 +146,23 @@ impl UdpServer {
         let mut packets_received = 0u64;
         let mut last_log = Instant::now();
 
-        println!("👂 UDP receiver ready, waiting for packets...");
-
         loop {
             match self.socket.recv_from(&mut buf) {
                 Ok((len, addr)) => {
                     packets_received += 1;
-                    println!(
-                        "📨 Received {} bytes from {} (total: {})",
-                        len, addr, packets_received
-                    );
 
                     if let Ok(packet) = UdpPacket::from_bytes(&buf[..len]) {
-                        println!(
-                            "📦 Packet type: {:?}, sequence: {}",
-                            packet.packet_type, packet.sequence
-                        );
                         self.handle_packet(packet, addr);
                     } else {
-                        println!("⚠️  Failed to parse packet from {}", addr);
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // Log periodically that we're still listening
                     if last_log.elapsed() > Duration::from_secs(10) {
-                        println!(
-                            "👂 Still listening... (packets received: {})",
-                            packets_received
-                        );
                         last_log = Instant::now();
                     }
                     thread::sleep(Duration::from_millis(10));
                 }
-                Err(e) => {
-                    eprintln!("UDP receive error: {}", e);
-                }
+                Err(e) => {}
             }
         }
     }
@@ -217,9 +170,6 @@ impl UdpServer {
     fn handle_packet(&self, packet: UdpPacket, addr: SocketAddr) {
         match packet.packet_type {
             PacketType::Connect => {
-                println!("🔌 New UDP client connected from {}", addr);
-
-                // Ajouter ou mettre à jour le client
                 let mut clients = self.clients.lock();
                 if let Some(client) = clients.iter_mut().find(|c| c.addr == addr) {
                     client.last_seen = Instant::now();
@@ -232,7 +182,6 @@ impl UdpServer {
                     });
                 }
 
-                // Envoyer un ACK
                 let ack = UdpPacket::new_ack(packet.sequence);
                 if let Ok(data) = ack.to_bytes() {
                     let _ = self.socket.send_to(&data, addr);
@@ -240,7 +189,6 @@ impl UdpServer {
             }
 
             PacketType::Command => {
-                // Mettre à jour le timestamp du client
                 {
                     let mut clients = self.clients.lock();
                     if let Some(client) = clients.iter_mut().find(|c| c.addr == addr) {
@@ -248,14 +196,12 @@ impl UdpServer {
                     }
                 }
 
-                // Traiter la commande
                 if let Some(command) = UdpCommand::from_payload(&packet.payload) {
                     self.process_command(command);
                 }
             }
 
             PacketType::Ping => {
-                // Répondre avec un pong
                 let pong = UdpPacket::new_pong(packet.sequence);
                 if let Ok(data) = pong.to_bytes() {
                     let _ = self.socket.send_to(&data, addr);
@@ -263,7 +209,6 @@ impl UdpServer {
             }
 
             PacketType::Disconnect => {
-                println!("🔌 UDP client disconnected from {}", addr);
                 let mut clients = self.clients.lock();
                 clients.retain(|c| c.addr != addr);
             }
@@ -275,24 +220,18 @@ impl UdpServer {
     fn process_command(&self, command: UdpCommand) {
         match command {
             UdpCommand::SetEffect(effect_id) => {
-                println!("🎨 Changing effect to: {}", effect_id);
                 self.state.effect_engine.lock().set_effect(effect_id);
             }
 
             UdpCommand::SetColorMode(mode) => {
-                println!("🎨 Setting color mode: {}", mode);
                 self.state.effect_engine.lock().set_color_mode(&mode);
             }
 
             UdpCommand::SetCustomColor(r, g, b) => {
-                println!("🎨 Setting custom color: RGB({}, {}, {})", r, g, b);
                 self.state.effect_engine.lock().set_custom_color(r, g, b);
             }
 
-            UdpCommand::SetParameter(name, value) => {
-                println!("🎛️  Parameter change: {} = {}", name, value);
-                // Traiter d'autres paramètres si nécessaire
-            }
+            UdpCommand::SetParameter(name, value) => {}
         }
     }
 }
@@ -328,11 +267,6 @@ impl TransmissionStats {
         let elapsed = self.last_print.elapsed().as_secs_f64();
         let pps = self.packets_sent as f64 / elapsed;
         let mbps = (self.bytes_sent as f64 * 8.0) / (elapsed * 1_000_000.0);
-
-        println!(
-            "📊 UDP Stats: {:.0} packets/s, {:.2} Mbps, {} total packets",
-            pps, mbps, self.packets_sent
-        );
 
         self.packets_sent = 0;
         self.bytes_sent = 0;
