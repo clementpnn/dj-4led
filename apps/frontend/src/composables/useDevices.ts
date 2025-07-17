@@ -322,10 +322,6 @@ export function useDevices() {
 
     // Initialize with some default devices (can be removed or moved to config)
     const initializeDefaultDevices = (): void => {
-        addDevice("Valise 1", "192.168.1.45");
-        addDevice("Valise 2", "192.168.1.46");
-        addDevice("Valise 3", "192.168.1.47");
-        addDevice("Valise 4", "192.168.1.48");
         
         if (devices.value.length > 0) {
             selectedDeviceId.value = devices.value[0].id;

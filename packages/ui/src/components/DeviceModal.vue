@@ -169,7 +169,7 @@ const emit = defineEmits<Emits>();
 const formData = ref<Device>({
     name: '',
     ipAddress: '',
-    port: 8081
+    port: 6454
 });
 
 const errors = ref<Record<string, string>>({});
