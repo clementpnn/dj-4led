@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "concurrently \"pnpm run dev:frontend\" \"pnpm run dev:backend\"",
     "dev:frontend": "pnpm --filter @monorepo/shared run dev",
+    "dev:tauri": "pnpm  --filter @monorepo/shared run tauri",
     "dev:backend": "pnpm --filter @monorepo/shared run backend",
     "build": "pnpm --filter @monorepo/shared run build",
     "preview": "pnpm --filter @monorepo/shared run preview",
