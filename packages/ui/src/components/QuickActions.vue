@@ -10,11 +10,6 @@
             <span class="btn-icon">🏓</span>
             <span>Ping ({{ pingMs }}ms)</span>
         </button>
-
-        <button @click="handleStream" class="action-btn accent" :disabled="loading">
-            <span class="btn-icon">📡</span>
-            <span>Stream ({{ fps }} fps)</span>
-        </button>
     </div>
 </template>
 

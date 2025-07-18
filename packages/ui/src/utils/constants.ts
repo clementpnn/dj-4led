@@ -20,13 +20,13 @@ export interface ColorChannel {
 
 export const EFFECTS: Effect[] = [
     { id: 0, name: 'Wave', emoji: '🌊' },
-    { id: 1, name: 'Pulse', emoji: '🥁' },
+    { id: 1, name: 'Pulse', emoji: '💓' },
     { id: 2, name: 'Strobe', emoji: '⚡' },
-    { id: 3, name: 'Heartbeat', emoji: '💗' },
-    { id: 4, name: 'Starfall', emoji: '⭐' },
-    { id: 5, name: 'Rain', emoji: '🌧️' },
-    { id: 6, name: 'Fire', emoji: '🔥' },
-    { id: 7, name: 'Cheer', emoji: '👏' },
+    { id: 3, name: 'Rainbow', emoji: '🌈' },
+    { id: 4, name: 'Matrix', emoji: '🔢' },
+    { id: 5, name: 'Fire', emoji: '🔥' },
+    { id: 6, name: 'Ocean', emoji: '🌊' },
+    { id: 7, name: 'Space', emoji: '🌌' },
 ];
 
 export const COLOR_MODES: ColorMode[] = [

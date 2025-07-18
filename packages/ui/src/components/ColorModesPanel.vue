@@ -2,7 +2,7 @@
 <template>
     <div class="panel modes-panel">
         <div class="panel-header">
-            <h2>🌈 Color Modes</h2>
+            <h2>Color Modes</h2>
             <div class="panel-subtitle">Select color pattern</div>
         </div>
 
@@ -92,6 +92,7 @@ const handleModeSelect = (mode: string): void => {
     flex: 1;
     min-width: 120px;
     font-size: 0.875rem;
+    color: #f0f6fc;
 }
 
 .mode-card:hover:not(:disabled) {
