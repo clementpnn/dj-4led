@@ -1,5 +1,3 @@
-// src/types/index.ts
-
 export interface CustomColor {
   r: number;
   g: number;
@@ -44,7 +42,6 @@ export interface ColorChannel {
   emoji: string;
 }
 
-// Result interfaces for async operations
 export interface ConnectionResult {
   success: boolean;
   message: string;

@@ -1,4 +1,3 @@
-<!-- src/components/CustomColorPanel.vue -->
 <template>
   <div class="panel color-panel">
     <div class="panel-header">

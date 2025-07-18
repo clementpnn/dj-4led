@@ -1,4 +1,3 @@
-// src/composables/useLogs.ts
 import { nextTick, ref } from "vue";
 
 interface LogEntry {

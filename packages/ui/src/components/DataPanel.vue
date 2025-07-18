@@ -1,4 +1,3 @@
-<!-- src/components/DataPanel.vue -->
 <template>
   <div
     v-if="streamData.frames.length > 0 || streamData.spectrum.length > 0"
@@ -10,7 +9,6 @@
     </div>
 
     <div class="data-grid">
-      <!-- Spectrum visualization -->
       <div v-if="streamData.spectrum.length > 0" class="spectrum-display">
         <h3>Audio Spectrum</h3>
         <div class="spectrum-bars">
@@ -23,7 +21,6 @@
         </div>
       </div>
 
-      <!-- Frame info -->
       <div v-if="streamData.lastFrame" class="frame-info">
         <h3>Frame Data</h3>
         <div class="frame-stats">

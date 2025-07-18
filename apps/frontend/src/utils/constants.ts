@@ -1,5 +1,3 @@
-// src/utils/constants.ts
-
 export interface Effect {
   id: number;
   name: string;
