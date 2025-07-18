@@ -17,12 +17,15 @@ interface StreamStats {
     frames: number;
     spectrum: number;
     duration?: number;
+    bytesReceived?: number;
+    packetsLost?: number;
 }
 
 interface StreamStatus {
-    status: 'started' | 'stopped' | 'auto_stopped';
+    status: 'started' | 'stopped' | 'auto_stopped' | 'error';
     message: string;
     stats?: StreamStats;
+    error?: string;
 }
 
 interface StreamingState {
@@ -32,7 +35,9 @@ interface StreamingState {
     fps: number;
     streamStats: StreamStats;
     lastFrameTime: number;
+    lastSpectrumTime: number;
     error: string | null;
+    connectionQuality: number; // 0-100
 }
 
 interface StreamResult {
@@ -47,7 +52,7 @@ interface StreamData {
 }
 
 export function useStreaming() {
-    // État réactif principal
+    // Enhanced reactive state
     const state = ref<StreamingState>({
         isStreaming: false,
         frameData: null,
@@ -57,12 +62,16 @@ export function useStreaming() {
             packets: 0,
             frames: 0,
             spectrum: 0,
+            bytesReceived: 0,
+            packetsLost: 0,
         },
         lastFrameTime: 0,
+        lastSpectrumTime: 0,
         error: null,
+        connectionQuality: 0,
     });
 
-    // États pour compatibilité avec l'ancienne interface
+    // Legacy compatibility
     const loading = ref(false);
     const streamData = ref<StreamData>({
         frames: [],
@@ -76,37 +85,60 @@ export function useStreaming() {
     let unlistenSpectrum: UnlistenFn | null = null;
     let unlistenStreamStatus: UnlistenFn | null = null;
 
-    // FPS calculation
+    // FPS and quality monitoring
     let frameCount = 0;
     let lastFpsTime = Date.now();
     let fpsUpdateInterval: number | null = null;
+    let qualityCheckInterval: number | null = null;
+    let lastDataReceived = Date.now();
+
+    // Spectrum smoothing
+    let previousSpectrum: number[] = [];
+    const spectrumSmoothingFactor = 0.7;
 
     /**
-     * Démarrer le streaming UDP
+     * Enhanced stream start with better error handling
      */
     const startStream = async (): Promise<StreamResult> => {
-        console.log('🚀 useStreaming: Starting UDP stream...');
+        console.log('🚀 useStreaming: Starting enhanced UDP stream...');
 
         try {
             loading.value = true;
             state.value.error = null;
 
+            // Pre-flight check
+            if (state.value.isStreaming) {
+                console.log('⚠️ useStreaming: Stream already active');
+                return {
+                    success: false,
+                    message: 'Stream is already active',
+                };
+            }
+
             const result = await invoke<string>('dj_start_stream');
             console.log('✅ useStreaming: Stream started:', result);
 
+            // Initialize state
             state.value.isStreaming = true;
             state.value.streamStats = {
                 packets: 0,
                 frames: 0,
                 spectrum: 0,
+                bytesReceived: 0,
+                packetsLost: 0,
             };
+            state.value.connectionQuality = 50; // Start with medium quality
 
-            // Reset FPS counter
+            // Reset counters
             frameCount = 0;
             lastFpsTime = Date.now();
-            startFpsMonitoring();
+            lastDataReceived = Date.now();
 
-            // Mise à jour des données legacy
+            // Start monitoring
+            startFpsMonitoring();
+            startQualityMonitoring();
+
+            // Reset legacy data
             streamData.value.frames = [];
             streamData.value.spectrum = [];
             streamData.value.lastFrame = null;
@@ -119,6 +151,7 @@ export function useStreaming() {
             console.error('❌ useStreaming: Stream start error:', error);
             const errorMessage = error instanceof Error ? error.message : String(error);
             state.value.error = errorMessage;
+
             return {
                 success: false,
                 message: `Failed to start stream: ${errorMessage}`,
@@ -129,10 +162,10 @@ export function useStreaming() {
     };
 
     /**
-     * Arrêter le streaming
+     * Enhanced stream stop with cleanup
      */
     const stopStream = async (): Promise<StreamResult> => {
-        console.log('🛑 useStreaming: Stopping UDP stream...');
+        console.log('🛑 useStreaming: Stopping enhanced UDP stream...');
 
         try {
             loading.value = true;
@@ -140,8 +173,10 @@ export function useStreaming() {
             const result = await invoke<string>('dj_stop_stream');
             console.log('✅ useStreaming: Stream stopped:', result);
 
+            // Clean state
             state.value.isStreaming = false;
             stopFpsMonitoring();
+            stopQualityMonitoring();
             clearStreamData();
 
             return {
@@ -161,7 +196,14 @@ export function useStreaming() {
     };
 
     /**
-     * Méthode legacy pour la compatibilité
+     * Clear streaming error
+     */
+    const clearError = (): void => {
+        state.value.error = null;
+    };
+
+    /**
+     * Legacy compatibility method
      */
     const listenData = async (): Promise<StreamResult> => {
         console.log('🔄 useStreaming: listenData called (redirecting to startStream)');
@@ -169,7 +211,7 @@ export function useStreaming() {
     };
 
     /**
-     * Effacer toutes les données de streaming
+     * Enhanced data clearing
      */
     const clearStreamData = (): void => {
         console.log('🧹 useStreaming: Clearing stream data...');
@@ -181,16 +223,21 @@ export function useStreaming() {
             lastFrame: null,
         };
 
-        // Ne pas réinitialiser complètement l'état si on est en streaming
+        // Reset spectrum smoothing
+        previousSpectrum = [];
+
+        // Clean state if not streaming
         if (!state.value.isStreaming) {
             state.value.frameData = null;
             state.value.spectrumData = [];
             state.value.lastFrameTime = 0;
+            state.value.lastSpectrumTime = 0;
+            state.value.connectionQuality = 0;
         }
     };
 
     /**
-     * Démarrer le monitoring FPS
+     * Enhanced FPS monitoring
      */
     const startFpsMonitoring = (): void => {
         if (fpsUpdateInterval) clearInterval(fpsUpdateInterval);
@@ -204,12 +251,51 @@ export function useStreaming() {
                 state.value.fps = newFps;
                 frameCount = 0;
                 lastFpsTime = now;
+
+                // Log significant FPS changes
+                if (state.value.isStreaming && (newFps === 0 || newFps < 5)) {
+                    console.warn(`⚠️ useStreaming: Low FPS detected: ${newFps}`);
+                }
             }
         }, 1000);
     };
 
     /**
-     * Arrêter le monitoring FPS
+     * Connection quality monitoring
+     */
+    const startQualityMonitoring = (): void => {
+        if (qualityCheckInterval) clearInterval(qualityCheckInterval);
+
+        qualityCheckInterval = window.setInterval(() => {
+            const now = Date.now();
+            const timeSinceLastData = now - lastDataReceived;
+            const currentFps = state.value.fps;
+
+            // Calculate quality based on data freshness and FPS
+            let quality = 100;
+
+            if (timeSinceLastData > 5000) {
+                quality = 0; // No data for 5+ seconds
+            } else if (timeSinceLastData > 2000) {
+                quality = 25; // Stale data
+            } else if (currentFps < 5) {
+                quality = 30; // Very low FPS
+            } else if (currentFps < 15) {
+                quality = 60; // Low FPS
+            } else if (currentFps < 25) {
+                quality = 80; // Good FPS
+            }
+
+            // Smooth quality changes
+            const smoothingFactor = 0.8;
+            state.value.connectionQuality = Math.round(
+                state.value.connectionQuality * smoothingFactor + quality * (1 - smoothingFactor)
+            );
+        }, 2000);
+    };
+
+    /**
+     * Stop monitoring intervals
      */
     const stopFpsMonitoring = (): void => {
         if (fpsUpdateInterval) {
@@ -219,11 +305,21 @@ export function useStreaming() {
         state.value.fps = 0;
     };
 
+    const stopQualityMonitoring = (): void => {
+        if (qualityCheckInterval) {
+            clearInterval(qualityCheckInterval);
+            qualityCheckInterval = null;
+        }
+    };
+
     /**
-     * Gérer les données de frame reçues du backend
+     * Enhanced frame data handling
      */
     const handleFrameData = (frameData: any): void => {
-        // Validation des données de frame
+        const now = Date.now();
+        lastDataReceived = now;
+
+        // Validation
         if (!frameData || typeof frameData.width !== 'number' || typeof frameData.height !== 'number') {
             console.warn('⚠️ useStreaming: Invalid frame data received:', frameData);
             return;
@@ -232,25 +328,27 @@ export function useStreaming() {
         const processedFrameData: FrameData = {
             width: frameData.width,
             height: frameData.height,
-            format: frameData.format || 1, // Default RGB
+            format: frameData.format || 1,
             data: Array.isArray(frameData.data) ? frameData.data : [],
-            timestamp: Date.now(),
+            timestamp: now,
         };
 
         console.log(
-            `🖼️ useStreaming: Frame received - ${processedFrameData.width}x${processedFrameData.height}, ${processedFrameData.data.length} bytes`
+            `🖼️ useStreaming: Frame ${state.value.streamStats.frames + 1} - ${processedFrameData.width}x${
+                processedFrameData.height
+            }, ${processedFrameData.data.length}B`
         );
 
-        // Mise à jour de l'état principal
+        // Update state
         state.value.frameData = processedFrameData;
-        state.value.lastFrameTime = Date.now();
+        state.value.lastFrameTime = now;
         state.value.streamStats.frames++;
+        state.value.streamStats.bytesReceived =
+            (state.value.streamStats.bytesReceived || 0) + processedFrameData.data.length;
 
-        // Mise à jour des données legacy
+        // Update legacy data with size limit
         streamData.value.lastFrame = processedFrameData;
         streamData.value.frames.push(processedFrameData);
-
-        // Limiter le nombre de frames stockées (garder seulement les 10 dernières)
         if (streamData.value.frames.length > 10) {
             streamData.value.frames = streamData.value.frames.slice(-10);
         }
@@ -260,46 +358,68 @@ export function useStreaming() {
     };
 
     /**
-     * Gérer les données de frame compressées
+     * Enhanced compressed frame handling
      */
     const handleCompressedFrameData = (compressedData: number[]): void => {
-        console.log('🗜️ useStreaming: Compressed frame received:', compressedData.length, 'bytes');
+        const now = Date.now();
+        lastDataReceived = now;
+
+        console.log(
+            `🗜️ useStreaming: Compressed frame ${state.value.streamStats.frames + 1} - ${compressedData.length}B`
+        );
+
         state.value.streamStats.frames++;
+        state.value.streamStats.bytesReceived = (state.value.streamStats.bytesReceived || 0) + compressedData.length;
         frameCount++;
 
-        // TODO: Implémenter la décompression si nécessaire
-        // Pour l'instant, on met à jour juste les compteurs
+        // TODO: Implement decompression if needed
     };
 
     /**
-     * Gérer les données de spectre audio reçues du backend
+     * Enhanced spectrum data handling with smoothing
      */
     const handleSpectrumData = (spectrumData: number[]): void => {
+        const now = Date.now();
+        lastDataReceived = now;
+
         if (!Array.isArray(spectrumData) || spectrumData.length === 0) {
             return;
         }
 
-        // Throttle spectrum updates pour éviter trop de re-renders
-        const isDifferent = spectrumData.some((v, i) => Math.abs(v - (state.value.spectrumData[i] || 0)) > 0.05);
+        // Apply smoothing to reduce jitter
+        let smoothedSpectrum: number[];
+        if (previousSpectrum.length === spectrumData.length) {
+            smoothedSpectrum = spectrumData.map((value, index) => {
+                const prevValue = previousSpectrum[index] || 0;
+                return prevValue * spectrumSmoothingFactor + value * (1 - spectrumSmoothingFactor);
+            });
+        } else {
+            smoothedSpectrum = [...spectrumData];
+        }
 
-        if (isDifferent) {
-            // Mise à jour de l'état principal
-            state.value.spectrumData = [...spectrumData];
-            state.value.streamStats.spectrum++;
+        // Update state
+        state.value.spectrumData = smoothedSpectrum;
+        state.value.lastSpectrumTime = now;
+        state.value.streamStats.spectrum++;
 
-            // Mise à jour des données legacy
-            streamData.value.spectrum = [...spectrumData];
+        // Update legacy data
+        streamData.value.spectrum = smoothedSpectrum;
 
-            if (state.value.streamStats.spectrum % 50 === 0) {
-                console.log(
-                    `🎵 useStreaming: Spectrum update #${state.value.streamStats.spectrum}, ${spectrumData.length} bands`
-                );
-            }
+        // Store for next smoothing iteration
+        previousSpectrum = smoothedSpectrum;
+
+        // Periodic logging (every 50th update)
+        if (state.value.streamStats.spectrum % 50 === 0) {
+            console.log(
+                `🎵 useStreaming: Spectrum update #${state.value.streamStats.spectrum}, ${
+                    spectrumData.length
+                } bands, peak: ${Math.max(...smoothedSpectrum).toFixed(2)}`
+            );
         }
     };
 
     /**
-     * Gérer les mises à jour de statut du stream
+     * Enhanced stream status handling
      */
     const handleStreamStatus = (status: StreamStatus): void => {
         console.log('📊 useStreaming: Stream status update:', status);
@@ -307,6 +427,11 @@ export function useStreaming() {
         if (status.status === 'stopped' || status.status === 'auto_stopped') {
             state.value.isStreaming = false;
             stopFpsMonitoring();
+            stopQualityMonitoring();
+        }
+
+        if (status.status === 'error') {
+            state.value.error = status.error || status.message;
         }
 
         if (status.stats) {
@@ -318,33 +443,52 @@ export function useStreaming() {
     };
 
     /**
-     * Configurer les event listeners pour les données UDP
+     * Enhanced event listeners setup
      */
     const setupEventListeners = async (): Promise<void> => {
-        console.log('🎧 useStreaming: Setting up UDP event listeners...');
+        console.log('🎧 useStreaming: Setting up enhanced UDP event listeners...');
 
         try {
-            // Écouter les données de frame (non compressées)
+            // Frame data listener with error handling
             unlistenFrame = await listen<any>('frame_data', event => {
-                handleFrameData(event.payload);
+                try {
+                    handleFrameData(event.payload);
+                } catch (error) {
+                    console.error('❌ useStreaming: Error handling frame data:', error);
+                    state.value.streamStats.packetsLost = (state.value.streamStats.packetsLost || 0) + 1;
+                }
             });
 
-            // Écouter les données de frame compressées
+            // Compressed frame data listener
             unlistenFrameCompressed = await listen<number[]>('frame_data_compressed', event => {
-                handleCompressedFrameData(event.payload);
+                try {
+                    handleCompressedFrameData(event.payload);
+                } catch (error) {
+                    console.error('❌ useStreaming: Error handling compressed frame:', error);
+                    state.value.streamStats.packetsLost = (state.value.streamStats.packetsLost || 0) + 1;
+                }
             });
 
-            // Écouter les données de spectre
+            // Spectrum data listener with error handling
             unlistenSpectrum = await listen<number[]>('spectrum_data', event => {
-                handleSpectrumData(event.payload);
+                try {
+                    handleSpectrumData(event.payload);
+                } catch (error) {
+                    console.error('❌ useStreaming: Error handling spectrum data:', error);
+                    state.value.streamStats.packetsLost = (state.value.streamStats.packetsLost || 0) + 1;
+                }
             });
 
-            // Écouter les mises à jour de statut du stream
+            // Stream status listener
             unlistenStreamStatus = await listen<StreamStatus>('stream_status', event => {
-                handleStreamStatus(event.payload);
+                try {
+                    handleStreamStatus(event.payload);
+                } catch (error) {
+                    console.error('❌ useStreaming: Error handling stream status:', error);
+                }
             });
 
-            console.log('✅ useStreaming: UDP event listeners ready');
+            console.log('✅ useStreaming: Enhanced UDP event listeners ready');
         } catch (error) {
             console.error('❌ useStreaming: Error setting up event listeners:', error);
             state.value.error = `Failed to setup event listeners: ${error}`;
@@ -352,10 +496,10 @@ export function useStreaming() {
     };
 
     /**
-     * Nettoyer les event listeners
+     * Enhanced cleanup with better error handling
      */
     const cleanup = (): void => {
-        console.log('🧹 useStreaming: Cleaning up...');
+        console.log('🧹 useStreaming: Enhanced cleanup...');
 
         const listeners = [
             { ref: unlistenFrame, name: 'frame' },
@@ -366,8 +510,12 @@ export function useStreaming() {
 
         listeners.forEach(({ ref, name }) => {
             if (ref) {
-                ref();
-                console.log(`✅ useStreaming: Cleaned up ${name} listener`);
+                try {
+                    ref();
+                    console.log(`✅ useStreaming: Cleaned up ${name} listener`);
+                } catch (error) {
+                    console.error(`❌ useStreaming: Error cleaning up ${name} listener:`, error);
+                }
             }
         });
 
@@ -377,19 +525,22 @@ export function useStreaming() {
         unlistenSpectrum = null;
         unlistenStreamStatus = null;
 
-        // Arrêter le monitoring
+        // Stop monitoring
         stopFpsMonitoring();
+        stopQualityMonitoring();
     };
 
     /**
-     * Réinitialiser l'état aux valeurs initiales
+     * Enhanced state reset
      */
     const reset = (): void => {
-        console.log('🔄 useStreaming: Resetting state...');
+        console.log('🔄 useStreaming: Enhanced state reset...');
 
-        // Arrêter le monitoring
+        // Stop monitoring
         stopFpsMonitoring();
+        stopQualityMonitoring();
 
+        // Reset state
         state.value = {
             isStreaming: false,
             frameData: null,
@@ -399,9 +550,13 @@ export function useStreaming() {
                 packets: 0,
                 frames: 0,
                 spectrum: 0,
+                bytesReceived: 0,
+                packetsLost: 0,
             },
             lastFrameTime: 0,
+            lastSpectrumTime: 0,
             error: null,
+            connectionQuality: 0,
         };
 
         // Reset legacy data
@@ -411,13 +566,16 @@ export function useStreaming() {
             lastFrame: null,
         };
 
+        // Reset counters and smoothing
         frameCount = 0;
         lastFpsTime = Date.now();
+        lastDataReceived = Date.now();
+        previousSpectrum = [];
         loading.value = false;
     };
 
     /**
-     * Obtenir les informations de connexion du serveur
+     * Get server information
      */
     const getServerInfo = async (): Promise<string> => {
         try {
@@ -430,17 +588,51 @@ export function useStreaming() {
     };
 
     /**
-     * Vérifier si le streaming est en bonne santé (reçoit des données récemment)
+     * Enhanced stream health check
      */
     const isStreamHealthy = (): boolean => {
         if (!state.value.isStreaming) return false;
-        if (state.value.lastFrameTime === 0) return true; // Vient de commencer
 
-        const timeSinceLastFrame = Date.now() - state.value.lastFrameTime;
-        return timeSinceLastFrame < 5000; // Considéré comme malsain si pas de données depuis 5s
+        const now = Date.now();
+        const timeSinceLastFrame = now - state.value.lastFrameTime;
+        const timeSinceLastSpectrum = now - state.value.lastSpectrumTime;
+
+        // Consider healthy if:
+        // 1. Just started (no data yet)
+        // 2. Recent frame data (within 3 seconds)
+        // 3. Recent spectrum data (within 2 seconds)
+        // 4. Good connection quality (> 30%)
+
+        if (state.value.lastFrameTime === 0 && state.value.lastSpectrumTime === 0) {
+            return true; // Just started
+        }
+
+        const hasRecentFrames = timeSinceLastFrame < 3000;
+        const hasRecentSpectrum = timeSinceLastSpectrum < 2000;
+        const goodQuality = state.value.connectionQuality > 30;
+
+        return (hasRecentFrames || hasRecentSpectrum) && goodQuality;
     };
 
-    // Propriétés computed pour une meilleure réactivité
+    /**
+     * Get detailed stream statistics
+     */
+    const getStreamStatistics = () => {
+        const now = Date.now();
+        return {
+            ...state.value.streamStats,
+            fps: state.value.fps,
+            connectionQuality: state.value.connectionQuality,
+            timeSinceLastFrame: state.value.lastFrameTime ? now - state.value.lastFrameTime : 0,
+            timeSinceLastSpectrum: state.value.lastSpectrumTime ? now - state.value.lastSpectrumTime : 0,
+            isHealthy: isStreamHealthy(),
+            dataRate: state.value.streamStats.bytesReceived
+                ? Math.round((state.value.streamStats.bytesReceived || 0) / 1024)
+                : 0, // KB
+        };
+    };
+
+    // Enhanced computed properties
     const isStreaming = computed(() => state.value.isStreaming);
     const frameData = computed(() => state.value.frameData);
     const spectrumData = computed(() => state.value.spectrumData);
@@ -448,16 +640,16 @@ export function useStreaming() {
     const streamStats = computed(() => state.value.streamStats);
     const error = computed(() => state.value.error);
     const lastFrameTime = computed(() => state.value.lastFrameTime);
+    const connectionQuality = computed(() => state.value.connectionQuality);
 
-    // Configuration au montage
+    // Lifecycle management
     onMounted(() => {
-        console.log('🚀 useStreaming: Component mounted, setting up UDP listeners...');
+        console.log('🚀 useStreaming: Enhanced component mounted, setting up UDP listeners...');
         setupEventListeners();
     });
 
-    // Nettoyage au démontage
     onUnmounted(() => {
-        console.log('💀 useStreaming: Component unmounting...');
+        console.log('💀 useStreaming: Enhanced component unmounting...');
         cleanup();
         if (state.value.isStreaming) {
             console.log('🛑 useStreaming: Auto-stopping stream on unmount...');
@@ -466,14 +658,14 @@ export function useStreaming() {
     });
 
     return {
-        // État réactif principal
+        // Enhanced reactive state
         state,
 
-        // Legacy compatibility - états réactifs
+        // Legacy compatibility
         loading,
         streamData,
 
-        // Getters computed
+        // Enhanced computed getters
         isStreaming,
         frameData,
         spectrumData,
@@ -481,17 +673,20 @@ export function useStreaming() {
         streamStats,
         error,
         lastFrameTime,
+        connectionQuality,
 
-        // Actions principales
+        // Enhanced actions
         startStream,
         stopStream,
+        clearError,
         listenData, // Legacy method
         clearStreamData,
         reset,
         getServerInfo,
         isStreamHealthy,
+        getStreamStatistics,
 
-        // Utilitaires
+        // Enhanced utilities
         setupEventListeners,
         cleanup,
     };
