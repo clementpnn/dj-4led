@@ -2,6 +2,7 @@
 use std::net::UdpSocket;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use tauri::{State, Window, Emitter};
 use serde_json::json;
 
@@ -26,6 +27,7 @@ const SERVER_ADDRESS: &str = "127.0.0.1:8081";
 
 // Global connection state
 type ConnectionState = Arc<Mutex<Option<UdpSocket>>>;
+type StreamState = Arc<Mutex<bool>>;
 
 // Structure de paquet UDP (12 bytes header + payload)
 fn create_packet(packet_type: u8, flags: u8, sequence: u32, payload: Vec<u8>) -> Vec<u8> {
@@ -55,6 +57,61 @@ fn get_timestamp() -> u32 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as u32
+}
+
+// Parse frame data from UDP packet
+fn parse_frame_data(data: &[u8]) -> Result<serde_json::Value, String> {
+    if data.len() < 5 {
+        return Err("Frame data too short".to_string());
+    }
+
+    let width = u16::from_le_bytes([data[0], data[1]]);
+    let height = u16::from_le_bytes([data[2], data[3]]);
+    let format = data[4];
+
+    let expected_size = match format {
+        1 => (width as usize) * (height as usize) * 3, // RGB
+        _ => return Err(format!("Unsupported format: {}", format)),
+    };
+
+    if data.len() < 5 + expected_size {
+        return Err("Insufficient frame data".to_string());
+    }
+
+    let rgb_data: Vec<u8> = data[5..5 + expected_size].to_vec();
+
+    Ok(json!({
+        "width": width,
+        "height": height,
+        "format": format,
+        "data": rgb_data
+    }))
+}
+
+// Parse spectrum data from UDP packet
+fn parse_spectrum_data(data: &[u8]) -> Result<Vec<f32>, String> {
+    if data.len() < 2 {
+        return Err("Spectrum data too short".to_string());
+    }
+
+    let band_count = u16::from_le_bytes([data[0], data[1]]);
+    let expected_size = 2 + (band_count as usize * 4);
+
+    if data.len() < expected_size {
+        return Err("Insufficient spectrum data".to_string());
+    }
+
+    let mut spectrum_values = Vec::with_capacity(band_count as usize);
+    for i in 0..band_count {
+        let offset = 2 + (i as usize * 4);
+        let value = f32::from_le_bytes([
+            data[offset], data[offset + 1],
+            data[offset + 2], data[offset + 3]
+        ]);
+        spectrum_values.push(value.clamp(0.0, 1.0)); // Ensure values are normalized
+    }
+
+    Ok(spectrum_values)
 }
 
 #[tauri::command]
@@ -91,7 +148,15 @@ async fn dj_connect(connection: State<'_, ConnectionState>) -> Result<String, St
 }
 
 #[tauri::command]
-async fn dj_disconnect(connection: State<'_, ConnectionState>) -> Result<String, String> {
+async fn dj_disconnect(
+    connection: State<'_, ConnectionState>,
+    stream_state: State<'_, StreamState>
+) -> Result<String, String> {
+    // Stop streaming first
+    if let Ok(mut streaming) = stream_state.lock() {
+        *streaming = false;
+    }
+
     let socket = create_socket_with_timeout(2)?;
 
     // Packet Disconnect selon la doc
@@ -199,95 +264,209 @@ async fn dj_set_custom_color(r: f32, g: f32, b: f32) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn dj_listen_data(window: Window) -> Result<String, String> {
-    let socket = create_socket_with_timeout(8)?;
+async fn dj_start_stream(
+    window: Window,
+    stream_state: State<'_, StreamState>
+) -> Result<String, String> {
+    println!("🚀 dj_start_stream: Starting stream command...");
 
-    let connect_packet = create_packet(CONNECT, 0x01, 0, vec![]);
-    socket.send_to(&connect_packet, SERVER_ADDRESS)
-        .map_err(|e| format!("Stream connection failed: {}", e))?;
-
-    let mut buf = [0; 2048];
-    let mut packets = 0;
-    let mut frames = 0;
-    let mut spectrum = 0;
-    let mut ack_received = false;
-
-    let start_time = std::time::Instant::now();
-    let max_duration = Duration::from_secs(8);
-
-    // Écouter pendant maximum 8 secondes
-    while start_time.elapsed() < max_duration {
-        match socket.recv_from(&mut buf) {
-            Ok((len, _)) => {
-                if len >= 12 {
-                    packets += 1;
-                    match buf[0] {
-                        ACK => {
-                            ack_received = true;
-                        }
-                        FRAME_DATA => {
-                            frames += 1;
-                            if len >= 17 {
-                                let width = u16::from_le_bytes([buf[12], buf[13]]);
-                                let height = u16::from_le_bytes([buf[14], buf[15]]);
-                                let format = buf[16];
-
-                                let frame_data = json!({
-                                    "width": width,
-                                    "height": height,
-                                    "format": format,
-                                    "data": &buf[17..len]
-                                });
-
-                                let _ = window.emit("frame_data", frame_data);
-                            }
-                        }
-                        FRAME_DATA_COMPRESSED => {
-                            frames += 1;
-                            let compressed_data = &buf[12..len];
-                            let _ = window.emit("frame_data_compressed", compressed_data);
-                        }
-                        SPECTRUM_DATA => {
-                            spectrum += 1;
-                            if len >= 14 {
-                                let band_count = u16::from_le_bytes([buf[12], buf[13]]);
-                                if len >= 14 + (band_count as usize * 4) {
-                                    let mut spectrum_values = Vec::with_capacity(band_count as usize);
-                                    for i in 0..band_count {
-                                        let offset = 14 + (i as usize * 4);
-                                        let value = f32::from_le_bytes([
-                                            buf[offset], buf[offset + 1],
-                                            buf[offset + 2], buf[offset + 3]
-                                        ]);
-                                        spectrum_values.push(value);
-                                    }
-                                    let _ = window.emit("spectrum_data", spectrum_values);
-                                }
-                            }
-                        }
-                        _ => {
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::TimedOut {
-                    continue;
-                } else {
-                    return Err(format!("Stream listen error: {}", e));
-                }
-            }
+    // Check if already streaming
+    if let Ok(streaming) = stream_state.lock() {
+        if *streaming {
+            println!("⚠️ dj_start_stream: Stream already active");
+            return Ok("📡 Stream already active".to_string());
         }
     }
 
-    if !ack_received {
-        return Ok("⚠️ No connection confirmation received".to_string());
+    println!("🔌 dj_start_stream: Creating socket...");
+    let socket = create_socket_with_timeout(1)?;
+
+    // Send connect packet with compression support
+    println!("📡 dj_start_stream: Sending connect packet to {}", SERVER_ADDRESS);
+    let connect_packet = create_packet(CONNECT, 0x01, get_timestamp(), vec![]);
+    socket.send_to(&connect_packet, SERVER_ADDRESS)
+        .map_err(|e| {
+            println!("❌ dj_start_stream: Connection failed: {}", e);
+            format!("Stream connection failed: {}", e)
+        })?;
+
+    // Wait for ACK
+    println!("⏳ dj_start_stream: Waiting for ACK...");
+    let mut buf = [0; 2048];
+    match socket.recv_from(&mut buf) {
+        Ok((len, addr)) => {
+            println!("📥 dj_start_stream: Received {} bytes from {}", len, addr);
+            if len < 1 || buf[0] != ACK {
+                println!("❌ dj_start_stream: No ACK received, got packet type: {:#04x}", buf[0]);
+                return Err("No ACK received for stream connection".to_string());
+            }
+            println!("✅ dj_start_stream: ACK received successfully");
+        }
+        Err(e) => {
+            println!("❌ dj_start_stream: Timeout waiting for ACK: {}", e);
+            return Err("Timeout waiting for stream ACK".to_string());
+        }
     }
 
-    if packets == 1 && frames == 0 && spectrum == 0 {
-        Ok("📡 Connected but no data received (silent server)".to_string())
+    // Set streaming state
+    if let Ok(mut streaming) = stream_state.lock() {
+        *streaming = true;
+        println!("🎯 dj_start_stream: Streaming state set to true");
+    }
+
+    let stream_state_clone = stream_state.inner().clone();
+    let window_clone = window.clone();
+
+    println!("🧵 dj_start_stream: Starting streaming thread...");
+
+    // Start streaming thread
+    thread::spawn(move || {
+        println!("🔄 Stream thread: Starting main loop...");
+        let mut packets_received = 0;
+        let mut frames_received = 0;
+        let mut spectrum_received = 0;
+        let start_time = std::time::Instant::now();
+
+        loop {
+            // Check if we should continue streaming
+            let should_continue = {
+                if let Ok(streaming) = stream_state_clone.lock() {
+                    *streaming
+                } else {
+                    false
+                }
+            };
+
+            if !should_continue {
+                println!("🛑 Stream thread: Stopping loop (should_continue = false)");
+                break;
+            }
+
+            match socket.recv_from(&mut buf) {
+                Ok((len, addr)) => {
+                    // Uncomment this line for very verbose debugging (will spam logs)
+                    // println!("📥 Stream thread: Received {} bytes from {}", len, addr);
+
+                    if len >= 12 {
+                        packets_received += 1;
+                        let packet_type = buf[0];
+                        let _flags = buf[1];
+                        let _sequence = u32::from_le_bytes([buf[2], buf[3], buf[4], buf[5]]);
+                        let payload_size = u16::from_le_bytes([buf[10], buf[11]]) as usize;
+
+                        if len >= 12 + payload_size {
+                            let payload = &buf[12..12 + payload_size];
+
+                            match packet_type {
+                                FRAME_DATA => {
+                                    frames_received += 1;
+                                    println!("🖼️ Stream thread: Processing FRAME_DATA ({})", frames_received);
+                                    match parse_frame_data(payload) {
+                                        Ok(frame_data) => {
+                                            println!("✅ Stream thread: Parsed frame data, emitting event...");
+                                            if let Err(e) = window_clone.emit("frame_data", frame_data) {
+                                                println!("❌ Stream thread: Failed to emit frame_data: {}", e);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            println!("❌ Stream thread: Error parsing frame data: {}", e);
+                                        }
+                                    }
+                                }
+                                FRAME_DATA_COMPRESSED => {
+                                    frames_received += 1;
+                                    println!("🗜️ Stream thread: Processing FRAME_DATA_COMPRESSED ({})", frames_received);
+                                    let compressed_data: Vec<u8> = payload.to_vec();
+                                    if let Err(e) = window_clone.emit("frame_data_compressed", compressed_data) {
+                                        println!("❌ Stream thread: Failed to emit frame_data_compressed: {}", e);
+                                    }
+                                }
+                                SPECTRUM_DATA => {
+                                    spectrum_received += 1;
+                                    if spectrum_received % 10 == 0 { // Log every 10th spectrum packet
+                                        println!("🎵 Stream thread: Processing SPECTRUM_DATA ({})", spectrum_received);
+                                    }
+                                    match parse_spectrum_data(payload) {
+                                        Ok(spectrum_values) => {
+                                            if let Err(e) = window_clone.emit("spectrum_data", spectrum_values) {
+                                                println!("❌ Stream thread: Failed to emit spectrum_data: {}", e);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            println!("❌ Stream thread: Error parsing spectrum data: {}", e);
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    // Log unknown packet types for debugging
+                                    println!("❓ Stream thread: Unknown packet type: {:#04x}", packet_type);
+                                }
+                            }
+                        } else {
+                            println!("⚠️ Stream thread: Packet too short for payload (len={}, expected={})", len, 12 + payload_size);
+                        }
+                    } else {
+                        println!("⚠️ Stream thread: Packet too short for header (len={})", len);
+                    }
+                }
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::TimedOut {
+                        // Timeout is normal, continue listening
+                        continue;
+                    } else {
+                        println!("❌ Stream thread: Receive error: {}", e);
+                        break;
+                    }
+                }
+            }
+
+            // Auto-stop after 60 seconds of streaming
+            if start_time.elapsed() > Duration::from_secs(60) {
+                println!("⏰ Stream thread: Auto-stopping after 60 seconds");
+                if let Ok(mut streaming) = stream_state_clone.lock() {
+                    *streaming = false;
+                }
+                let _ = window_clone.emit("stream_status", json!({
+                    "status": "auto_stopped",
+                    "message": "Stream auto-stopped after 60 seconds",
+                    "stats": {
+                        "packets": packets_received,
+                        "frames": frames_received,
+                        "spectrum": spectrum_received
+                    }
+                }));
+                break;
+            }
+        }
+
+        // Emit final stats
+        println!("📊 Stream thread: Final stats - packets: {}, frames: {}, spectrum: {}",
+                packets_received, frames_received, spectrum_received);
+        let _ = window_clone.emit("stream_status", json!({
+            "status": "stopped",
+            "message": "Stream stopped",
+            "stats": {
+                "packets": packets_received,
+                "frames": frames_received,
+                "spectrum": spectrum_received,
+                "duration": start_time.elapsed().as_secs()
+            }
+        }));
+
+        println!("🏁 Stream thread: Thread ended");
+    });
+
+    println!("✅ dj_start_stream: Command completed successfully");
+    Ok("📡 Stream started - listening for LED data and audio spectrum".to_string())
+}
+
+#[tauri::command]
+async fn dj_stop_stream(stream_state: State<'_, StreamState>) -> Result<String, String> {
+    if let Ok(mut streaming) = stream_state.lock() {
+        *streaming = false;
+        Ok("📡 Stream stopped".to_string())
     } else {
-        Ok(format!("📡 Stream received: {} packets ({} frames, {} spectrum)", packets, frames, spectrum))
+        Err("Failed to stop stream".to_string())
     }
 }
 
@@ -304,10 +483,12 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let connection_state: ConnectionState = Arc::new(Mutex::new(None));
+    let stream_state: StreamState = Arc::new(Mutex::new(false));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(connection_state)
+        .manage(stream_state)
         .invoke_handler(tauri::generate_handler![
             greet,
             dj_connect,
@@ -316,7 +497,8 @@ pub fn run() {
             dj_set_effect,
             dj_set_color_mode,
             dj_set_custom_color,
-            dj_listen_data,
+            dj_start_stream,
+            dj_stop_stream,
             dj_get_server_info
         ])
         .run(tauri::generate_context!())

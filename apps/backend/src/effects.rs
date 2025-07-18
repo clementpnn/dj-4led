@@ -1,4 +1,5 @@
 use rayon::prelude::*;
+use std::f32::consts::PI;
 
 pub trait Effect: Send + Sync {
     fn render(&mut self, spectrum: &[f32], frame: &mut [u8]);
@@ -727,10 +728,8 @@ impl Effect for ParticleSystem {
         // Custom color is now set globally
     }
 }
-// Effet Flammes Amélioré: Flammèche réaliste qui grandit avec le son
-use rand::Rng;
-use std::f32::consts::PI;
 
+// Effet 4: Flammes
 pub struct Flames {
     // Particules de flammes individuelles
     particles: Vec<FlameParticle>,
@@ -742,8 +741,6 @@ pub struct Flames {
     sound_history: Vec<f32>,
     // Température globale de la flamme
     base_temperature: f32,
-    // Générateur de nombres aléatoires
-    rng: rand::rngs::ThreadRng,
 }
 
 // Structure pour une particule de flamme individuelle
@@ -761,17 +758,17 @@ struct FlameParticle {
 }
 
 impl FlameParticle {
-    fn new(x: f32, y: f32, temperature: f32, rng: &mut rand::rngs::ThreadRng) -> Self {
+    fn new(x: f32, y: f32, temperature: f32) -> Self {
         Self {
             x,
             y,
-            velocity_x: rng.gen_range(-0.5..0.5),
-            velocity_y: rng.gen_range(-2.0..-0.5), // Toujours vers le haut
+            velocity_x: (rand() - 0.5),
+            velocity_y: -rand() * 1.5 - 0.5, // Toujours vers le haut
             temperature,
             age: 0.0,
-            max_age: rng.gen_range(15.0..45.0),
-            size: rng.gen_range(0.5..2.0),
-            turbulence_offset: rng.gen::<f32>() * 2.0 * PI,
+            max_age: 15.0 + rand() * 30.0,
+            size: 0.5 + rand() * 1.5,
+            turbulence_offset: rand() * 2.0 * PI,
         }
     }
 
@@ -780,7 +777,7 @@ impl FlameParticle {
 
         // Turbulence naturelle pour un mouvement réaliste
         let turbulence_x = (time * 0.1 + self.turbulence_offset).sin() * 0.3;
-        let turbulence_y = (time * 0.08 + self.turbulence_offset * 1.3).cos() * 0.2;
+        let _turbulence_y = (time * 0.08 + self.turbulence_offset * 1.3).cos() * 0.2;
 
         // Accélération vers le haut plus forte avec plus de son
         self.velocity_y -= 0.15 + sound_intensity * 0.1;
@@ -821,7 +818,6 @@ impl Flames {
             time: 0.0,
             sound_history: vec![0.0; 10],
             base_temperature: 0.0,
-            rng: rand::thread_rng(),
         }
     }
 
@@ -918,9 +914,9 @@ impl Flames {
 
         for _ in 0..total_new_particles {
             // Position aléatoire à la base
-            let x_offset = self.rng.gen_range(-base_width..base_width);
+            let x_offset = (rand() - 0.5) * base_width * 2.0;
             let x = base_center + x_offset;
-            let y = 127.0 + self.rng.gen_range(-2.0..2.0);
+            let y = 127.0 + (rand() - 0.5) * 4.0;
 
             // Température plus élevée au centre
             let distance_from_center = (x - base_center).abs() / base_width;
@@ -929,7 +925,7 @@ impl Flames {
 
             // Créer la particule
             if x >= 0.0 && x < 128.0 {
-                let particle = FlameParticle::new(x, y, temperature, &mut self.rng);
+                let particle = FlameParticle::new(x, y, temperature);
                 self.particles.push(particle);
             }
         }
@@ -937,18 +933,18 @@ impl Flames {
 
     fn add_sparks(&mut self, sound_intensity: f32) {
         // Ajouter des étincelles qui jaillissent avec le son fort
-        if sound_intensity > 0.3 && self.rng.gen::<f32>() < sound_intensity * 0.5 {
+        if sound_intensity > 0.3 && rand() < sound_intensity * 0.5 {
             let spark_count = (sound_intensity * 5.0) as usize;
 
             for _ in 0..spark_count {
-                let x = 64.0 + self.rng.gen_range(-30.0..30.0);
-                let y = 127.0 - self.rng.gen_range(0.0..40.0);
+                let x = 64.0 + (rand() - 0.5) * 60.0;
+                let y = 127.0 - rand() * 40.0;
 
-                let mut spark = FlameParticle::new(x, y, 0.9, &mut self.rng);
-                spark.velocity_x = self.rng.gen_range(-3.0..3.0);
-                spark.velocity_y = self.rng.gen_range(-5.0..-1.0);
-                spark.max_age = self.rng.gen_range(8.0..20.0);
-                spark.size = self.rng.gen_range(0.3..1.0);
+                let mut spark = FlameParticle::new(x, y, 0.9);
+                spark.velocity_x = (rand() - 0.5) * 6.0;
+                spark.velocity_y = -rand() * 4.0 - 1.0;
+                spark.max_age = 8.0 + rand() * 12.0;
+                spark.size = 0.3 + rand() * 0.7;
 
                 self.particles.push(spark);
             }
@@ -1656,14 +1652,10 @@ impl Effect for Applaudimetre {
 }
 
 // Effet 7: Starfall
-use rand::Rng;
-use std::f32::consts::PI;
-
 pub struct Starfall {
     shooting_stars: Vec<ShootingStar>,
     animation_time: f32,
     spawn_timer: f32,
-    rng: rand::rngs::ThreadRng,
 }
 
 struct ShootingStar {
@@ -1700,33 +1692,33 @@ struct TrailPoint {
 }
 
 impl ShootingStar {
-    fn new(spawn_side: SpawnSide, sound_intensity: f32, rng: &mut rand::rngs::ThreadRng) -> Self {
+    fn new(spawn_side: SpawnSide, sound_intensity: f32) -> Self {
         let (start_x, start_y, vel_x, vel_y) = match spawn_side {
             SpawnSide::TopLeft => {
-                let x = rng.gen_range(-30.0..-10.0);
-                let y = rng.gen_range(-30.0..50.0);
-                let vx = rng.gen_range(2.0..5.0) + sound_intensity * 3.0;
-                let vy = rng.gen_range(1.5..4.0) + sound_intensity * 2.0;
+                let x = -30.0 + rand() * 20.0;
+                let y = -30.0 + rand() * 80.0;
+                let vx = 2.0 + rand() * 3.0 + sound_intensity * 3.0;
+                let vy = 1.5 + rand() * 2.5 + sound_intensity * 2.0;
                 (x, y, vx, vy)
             },
             SpawnSide::TopRight => {
-                let x = rng.gen_range(138.0..158.0);
-                let y = rng.gen_range(-30.0..50.0);
-                let vx = rng.gen_range(-5.0..-2.0) - sound_intensity * 3.0;
-                let vy = rng.gen_range(1.5..4.0) + sound_intensity * 2.0;
+                let x = 138.0 + rand() * 20.0;
+                let y = -30.0 + rand() * 80.0;
+                let vx = -2.0 - rand() * 3.0 - sound_intensity * 3.0;
+                let vy = 1.5 + rand() * 2.5 + sound_intensity * 2.0;
                 (x, y, vx, vy)
             },
             SpawnSide::Top => {
-                let x = rng.gen_range(20.0..108.0);
-                let y = rng.gen_range(-40.0..-10.0);
-                let vx = rng.gen_range(-2.0..2.0);
-                let vy = rng.gen_range(3.0..6.0) + sound_intensity * 3.0;
+                let x = 20.0 + rand() * 88.0;
+                let y = -40.0 + rand() * 30.0;
+                let vx = (rand() - 0.5) * 4.0;
+                let vy = 3.0 + rand() * 3.0 + sound_intensity * 3.0;
                 (x, y, vx, vy)
             },
         };
 
         // Couleurs d'étoiles réalistes
-        let star_temp = rng.gen_range(0.0..1.0);
+        let star_temp = rand();
         let base_color = if star_temp < 0.1 {
             // Étoiles bleues (très chaudes)
             (0.7, 0.8, 1.0)
@@ -1749,15 +1741,15 @@ impl ShootingStar {
             y: start_y,
             velocity_x: vel_x,
             velocity_y: vel_y,
-            brightness: 0.6 + rng.gen_range(0.0..0.4) + sound_intensity * 0.3,
-            size: 1.0 + rng.gen_range(0.0..2.0) + sound_intensity * 1.5,
+            brightness: 0.6 + rand() * 0.4 + sound_intensity * 0.3,
+            size: 1.0 + rand() * 2.0 + sound_intensity * 1.5,
             color: base_color,
             trail_points: Vec::new(),
             max_trail_length: (15 + (sound_intensity * 25.0) as usize).min(40),
             age: 0.0,
-            max_age: 120.0 + rng.gen_range(0.0..60.0),
-            twinkle_phase: rng.gen::<f32>() * 2.0 * PI,
-            twinkle_speed: 0.1 + rng.gen_range(0.0..0.2),
+            max_age: 120.0 + rand() * 60.0,
+            twinkle_phase: rand() * 2.0 * PI,
+            twinkle_speed: 0.1 + rand() * 0.2,
         }
     }
 
@@ -1827,7 +1819,6 @@ impl Starfall {
             shooting_stars: Vec::new(),
             animation_time: 0.0,
             spawn_timer: 0.0,
-            rng: rand::thread_rng(),
         }
     }
 
@@ -1871,13 +1862,13 @@ impl Starfall {
 
     fn spawn_shooting_star(&mut self, sound_intensity: f32) {
         // Choisir un côté de spawn aléatoire
-        let spawn_side = match self.rng.gen_range(0..3) {
+        let spawn_side = match (rand() * 3.0) as usize {
             0 => SpawnSide::TopLeft,
             1 => SpawnSide::TopRight,
             _ => SpawnSide::Top,
         };
 
-        let star = ShootingStar::new(spawn_side, sound_intensity, &mut self.rng);
+        let star = ShootingStar::new(spawn_side, sound_intensity);
         self.shooting_stars.push(star);
     }
 
@@ -1887,7 +1878,7 @@ impl Starfall {
         for _ in 0..meteor_count {
             // Tous viennent du même quadrant pour un effet de pluie
             let spawn_side = SpawnSide::TopLeft;
-            let mut star = ShootingStar::new(spawn_side, intensity, &mut self.rng);
+            let mut star = ShootingStar::new(spawn_side, intensity);
 
             // Météores plus rapides et plus brillants
             star.velocity_x *= 1.5;
@@ -1944,7 +1935,7 @@ impl Effect for Starfall {
         }
 
         // Créer une pluie de météores lors de pics sonores très intenses
-        if total_energy > 0.85 && self.rng.gen::<f32>() < 0.1 {
+        if total_energy > 0.85 && rand() < 0.1 {
             self.create_meteor_shower(total_energy);
         }
 
@@ -2373,7 +2364,7 @@ impl Effect for Heartbeat {
     }
 }
 
-// Helpers
+// Fonction helper pour HSV vers RGB
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     let c = v * s;
     let x = c * (1.0 - ((h * 6.0) % 2.0 - 1.0).abs());
@@ -2391,6 +2382,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     (r + m, g + m, b + m)
 }
 
+// Fonction helper pour générer des nombres aléatoires
 fn rand() -> f32 {
     use std::cell::Cell;
     thread_local! {

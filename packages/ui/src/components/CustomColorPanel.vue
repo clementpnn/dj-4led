@@ -2,7 +2,7 @@
 <template>
     <div class="panel color-panel">
         <div class="panel-header">
-            <h2>🎨 Custom Color</h2>
+            <h2>Custom Color</h2>
             <div class="panel-subtitle">Create your own color</div>
         </div>
 
@@ -123,8 +123,8 @@ import { computed } from 'vue';
 }
 
 .color-preview-large {
-    max-width: 100px;
-    height: 80px;
+    width: 100px;
+    height: 100px;
     border-radius: 10px;
     border: 2px solid #333;
     position: relative;

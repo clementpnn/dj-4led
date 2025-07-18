@@ -1,11 +1,6 @@
 // src/composables/useLogs.ts
 import { nextTick, ref } from 'vue';
-
-interface LogEntry {
-    time: string;
-    message: string;
-    type: 'info' | 'success' | 'error' | 'warning';
-}
+import { LogEntry } from '../types';
 
 export function useLogs() {
     const logs = ref<LogEntry[]>([]);

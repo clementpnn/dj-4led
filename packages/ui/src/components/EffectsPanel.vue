@@ -2,7 +2,7 @@
 <template>
     <div class="panel effects-panel">
         <div class="panel-header">
-            <h2>🎇 Effects</h2>
+            <h2>Effects</h2>
             <div class="panel-subtitle">Choose your LED effect</div>
         </div>
 

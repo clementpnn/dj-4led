@@ -1,87 +1,87 @@
-<!-- src/components/Header.vue -->
 <template>
-    <header class="header">
-        <div class="logo">
-            <div class="logo-icon">🎵</div>
-            <h1>DJ-4LED</h1>
-            <div class="logo-icon">💡</div>
+    <div class="header">
+        <h1>DJ-4LED</h1>
+        <div class="status">
+            <span :class="isConnected ? 'connected' : 'disconnected'">
+                {{ isConnected ? '● Connected' : '○ Disconnected' }}
+            </span>
+            <span v-if="isConnected && fps > 0" class="fps"> {{ fps }} FPS </span>
         </div>
-        <div class="status-badge" :class="{ connected: isConnected }">
-            <div class="status-dot"></div>
-            {{ isConnected ? 'Connected' : 'Disconnected' }}
-        </div>
-    </header>
+    </div>
 </template>
 
 <script setup>
-defineProps({
+const props = defineProps({
     isConnected: {
         type: Boolean,
         default: false,
+    },
+    fps: {
+        type: Number,
+        default: 0,
     },
 });
 </script>
 
 <style scoped>
 .header {
-    padding: 2rem;
-    text-align: center;
-    border-bottom: 1px solid #21262d;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+    background: rgba(22, 27, 34, 0.8);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid #30363d;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .logo {
+    font-size: 1.75rem;
+    filter: drop-shadow(0 0 8px rgba(88, 166, 255, 0.4));
+}
+
+.status {
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 1rem;
-    margin-bottom: 1.5rem;
+    font-size: 0.875rem;
 }
 
-.logo-icon {
-    font-size: 2.5rem;
-    opacity: 0.8;
-}
-
-.logo h1 {
-    font-size: 3rem;
-    font-weight: 600;
-    margin: 0;
-    color: #f0f6fc;
-    letter-spacing: 1px;
-}
-
-.status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1.5rem;
-    background: #21262d;
-    border: 1px solid #30363d;
-    border-radius: 8px;
+.connected {
+    color: #238636;
     font-weight: 500;
-    font-size: 0.9rem;
 }
 
-.status-badge.connected {
-    background: #0d4929;
-    border-color: #1a7f37;
-    color: #2ea043;
+.disconnected {
+    color: #f85149;
+    font-weight: 500;
 }
 
-.status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #f85149;
-}
-
-.status-badge.connected .status-dot {
-    background: #2ea043;
+.fps {
+    background: linear-gradient(45deg, #238636, #2ea043);
+    color: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.75rem;
 }
 
 @media (max-width: 768px) {
-    .logo h1 {
-        font-size: 2.5rem;
+    .header {
+        flex-direction: column;
+        gap: 1rem;
+        padding: 1rem;
     }
 }
 </style>
