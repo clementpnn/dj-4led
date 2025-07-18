@@ -17,9 +17,6 @@ importers:
 
   apps/frontend:
     dependencies:
-      '@monorepo/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@tauri-apps/api':
         specifier: ^2.6.0
         version: 2.6.0

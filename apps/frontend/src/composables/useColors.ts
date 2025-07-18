@@ -1,4 +1,3 @@
-// src/composables/useColors.ts
 import { invoke } from "@tauri-apps/api/core";
 import { computed, ref } from "vue";
 

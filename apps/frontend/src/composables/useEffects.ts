@@ -1,4 +1,3 @@
-// src/composables/useEffects.ts
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
 

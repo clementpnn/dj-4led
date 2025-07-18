@@ -2,7 +2,6 @@
   <div class="app">
     <HeaderComponent :is-connected="connection.isConnected.value" />
     <div class="main-content">
-      <!-- Quick actions -->
       <QuickActions
         :is-connected="connection.isConnected.value"
         :loading="connection.loading.value"
@@ -51,9 +50,9 @@
       </div>
 
       <Terminal
+        ref="terminalRef"
         :logs="logs.logs.value"
         @clear-logs="logs.clearLogs"
-        ref="terminalRef"
       />
     </div>
   </div>
@@ -161,7 +160,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-
 *,
 *::before,
 *::after {
