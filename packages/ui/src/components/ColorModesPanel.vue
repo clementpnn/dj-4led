@@ -2,7 +2,7 @@
 <template>
   <div class="panel modes-panel">
     <div class="panel-header">
-      <h2>🌈 Color Modes</h2>
+      <h2>Color Modes</h2>
       <div class="panel-subtitle">Select color pattern</div>
     </div>
 
@@ -10,15 +10,29 @@
       <button
         v-for="mode in colorModes"
         :key="mode.value"
+        @click="handleModeSelect(mode.value)"
         class="mode-card"
         :class="{ active: currentMode === mode.value }"
         :disabled="!isConnected || loading"
-        @click="handleModeSelect(mode.value)"
       >
         <span class="mode-emoji">{{ mode.emoji }}</span>
         <span class="mode-label">{{ mode.label }}</span>
       </button>
     </div>
+  </div>
+
+  <div class="modes-grid">
+    <button
+      v-for="mode in colorModes"
+      :key="mode.value"
+      class="mode-card"
+      :class="{ active: currentMode === mode.value }"
+      :disabled="!isConnected || loading"
+      @click="handleModeSelect(mode.value)"
+    >
+      <span class="mode-emoji">{{ mode.emoji }}</span>
+      <span class="mode-label">{{ mode.label }}</span>
+    </button>
   </div>
 </template>
 
@@ -92,6 +106,7 @@ const handleModeSelect = (mode: string): void => {
   flex: 1;
   min-width: 120px;
   font-size: 0.875rem;
+  color: #f0f6fc;
 }
 
 .mode-card:hover:not(:disabled) {

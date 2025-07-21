@@ -1,16 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { computed, ref } from "vue";
-
-interface CustomColor {
-  r: number;
-  g: number;
-  b: number;
-}
-
-interface ColorResult {
-  success: boolean;
-  message: string;
-}
+import { ColorResult, CustomColor } from "../types";
 
 export function useColors() {
   const currentMode = ref<string | undefined>(undefined);

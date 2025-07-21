@@ -1,10 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-
-interface EffectResult {
-  success: boolean;
-  message: string;
-}
+import { EffectResult } from "../types";
 
 export function useEffects() {
   const currentEffect = ref<number | undefined>(undefined);

@@ -2,7 +2,7 @@
 <template>
   <div class="panel effects-panel">
     <div class="panel-header">
-      <h2>🎇 Effects</h2>
+      <h2>Effects</h2>
       <div class="panel-subtitle">Choose your LED effect</div>
     </div>
 
@@ -10,15 +10,29 @@
       <button
         v-for="effect in effects"
         :key="effect.id"
+        @click="handleEffectSelect(effect.id)"
         class="effect-card"
         :class="{ active: currentEffect === effect.id }"
         :disabled="!isConnected || loading"
-        @click="handleEffectSelect(effect.id)"
       >
         <div class="effect-emoji">{{ effect.emoji }}</div>
         <div class="effect-name">{{ effect.name }}</div>
       </button>
     </div>
+  </div>
+
+  <div class="effects-grid">
+    <button
+      v-for="effect in effects"
+      :key="effect.id"
+      class="effect-card"
+      :class="{ active: currentEffect === effect.id }"
+      :disabled="!isConnected || loading"
+      @click="handleEffectSelect(effect.id)"
+    >
+      <div class="effect-emoji">{{ effect.emoji }}</div>
+      <div class="effect-name">{{ effect.name }}</div>
+    </button>
   </div>
 </template>
 
