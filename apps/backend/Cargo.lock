@@ -385,7 +385,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "led-visualizer"
+name = "led_visualizer"
 version = "0.1.0"
 dependencies = [
  "anyhow",

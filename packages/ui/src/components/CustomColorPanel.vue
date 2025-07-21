@@ -1,8 +1,39 @@
 <template>
-  <div class="panel color-panel">
-    <div class="panel-header">
-      <h2>🎨 Custom Color</h2>
-      <div class="panel-subtitle">Create your own color</div>
+    <div class="panel color-panel">
+        <div class="panel-header">
+            <h2>Custom Color</h2>
+            <div class="panel-subtitle">Create your own color</div>
+        </div>
+
+        <div class="color-workspace">
+            <div class="color-preview-large" :style="colorPreviewStyle">
+                <div class="color-info">{{ hexValue }}</div>
+            </div>
+
+            <div class="color-sliders">
+                <div class="slider-control" v-for="channel in colorChannels" :key="channel.key">
+                    <div class="slider-label">
+                        <span class="color-emoji">{{ channel.emoji }}</span>
+                        <span class="color-name">{{ channel.name }}</span>
+                        <span class="color-value">{{ Math.round(customColor[channel.key] * 255) }}</span>
+                    </div>
+                    <div class="slider-wrapper">
+                        <input
+                            v-model.number="customColor[channel.key]"
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            :class="['slider', channel.key]"
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <button @click="handleApplyColor" class="apply-color-btn" :disabled="!isConnected || loading">
+                ✨ Apply Color
+            </button>
+        </div>
     </div>
 
     <div class="color-workspace">
@@ -132,16 +163,16 @@ import { computed } from "vue";
 }
 
 .color-preview-large {
-  max-width: 100px;
-  height: 80px;
-  border-radius: 10px;
-  border: 2px solid #333;
-  position: relative;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 0.5rem;
+    width: 100px;
+    height: 100px;
+    border-radius: 10px;
+    border: 2px solid #333;
+    position: relative;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 0.5rem;
 }
 
 .color-preview-large:hover {

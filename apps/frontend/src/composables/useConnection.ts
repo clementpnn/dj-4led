@@ -1,11 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-
-interface ConnectionResult {
-  success: boolean;
-  message: string;
-  pingMs?: number;
-}
+import { ConnectionResult } from "../types";
 
 export function useConnection() {
   const isConnected = ref<boolean>(false);
