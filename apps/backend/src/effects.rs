@@ -62,7 +62,6 @@ impl EffectEngine {
 
         if let Some(effect) = self.effects.get_mut(self.current) {
             effect.render(spectrum, &mut frame);
-        } else {
         }
 
         frame
@@ -71,7 +70,6 @@ impl EffectEngine {
     pub fn set_effect(&mut self, index: usize) {
         if index < self.effects.len() {
             self.current = index;
-        } else {
         }
     }
 
@@ -82,7 +80,7 @@ impl EffectEngine {
             GLOBAL_COLOR_CONFIG.mode = mode.to_string();
         }
 
-        for (i, effect) in self.effects.iter_mut().enumerate() {
+        for (_i, effect) in self.effects.iter_mut().enumerate() {
             effect.set_color_mode(mode);
         }
     }
@@ -94,7 +92,7 @@ impl EffectEngine {
             GLOBAL_COLOR_CONFIG.custom_color = (r, g, b);
         }
 
-        for (i, effect) in self.effects.iter_mut().enumerate() {
+        for (_i, effect) in self.effects.iter_mut().enumerate() {
             effect.set_custom_color(r, g, b);
         }
     }
@@ -188,7 +186,7 @@ impl Effect for SpectrumBars {
         unsafe {
             DEBUG_COUNTER += 1;
             if DEBUG_COUNTER % 50 == 0 {
-                let max_level = self.smoothed.iter().cloned().fold(0.0f32, f32::max);
+                let _max_level = self.smoothed.iter().cloned().fold(0.0f32, f32::max);
             }
         }
 
@@ -257,9 +255,9 @@ impl Effect for SpectrumBars {
         });
     }
 
-    fn set_color_mode(&mut self, mode: &str) {}
+    fn set_color_mode(&mut self, _mode: &str) {}
 
-    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {}
+    fn set_custom_color(&mut self, _r: f32, _g: f32, _b: f32) {}
 }
 
 pub struct CircularWave {
@@ -362,9 +360,9 @@ impl Effect for CircularWave {
         });
     }
 
-    fn set_color_mode(&mut self, mode: &str) {}
+    fn set_color_mode(&mut self, _mode: &str) {}
 
-    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {}
+    fn set_custom_color(&mut self, _r: f32, _g: f32, _b: f32) {}
 }
 
 pub struct ParticleSystem {
@@ -556,9 +554,9 @@ impl Effect for ParticleSystem {
         }
     }
 
-    fn set_color_mode(&mut self, mode: &str) {}
+    fn set_color_mode(&mut self, _mode: &str) {}
 
-    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {}
+    fn set_custom_color(&mut self, _r: f32, _g: f32, _b: f32) {}
 }
 
 pub struct Flames {
@@ -770,7 +768,6 @@ impl Effect for Flames {
         self.time += 1.0 + sound_intensity * 2.0;
 
         self.create_flame_base(smoothed_intensity);
-
         self.add_sparks(sound_intensity);
 
         let wind_force = (high_energy - 0.1).max(0.0) * 0.3 * (self.time * 0.05).sin();
@@ -835,6 +832,18 @@ impl Effect for Flames {
                     frame[frame_idx + 2] = (b * 255.0).clamp(0.0, 255.0) as u8;
                 }
             }
+        }
+    }
+
+    fn set_color_mode(&mut self, _mode: &str) {
+        unsafe {
+            GLOBAL_COLOR_CONFIG.mode = _mode.to_string();
+        }
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        unsafe {
+            GLOBAL_COLOR_CONFIG.custom_color = (r, g, b);
         }
     }
 }
@@ -1220,7 +1229,7 @@ impl Effect for Applaudimetre {
         self.level_history.remove(0);
         self.level_history.push(self.current_level);
 
-        if self.peak_history.len() > 0 {
+        if !self.peak_history.is_empty() {
             self.peak_history.remove(0);
             self.peak_history.push(self.current_level);
         }
@@ -1365,6 +1374,18 @@ impl Effect for Applaudimetre {
                         .saturating_add(frame[idx + 2]);
                 }
             }
+        }
+    }
+
+    fn set_color_mode(&mut self, _mode: &str) {
+        unsafe {
+            GLOBAL_COLOR_CONFIG.mode = _mode.to_string();
+        }
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        unsafe {
+            GLOBAL_COLOR_CONFIG.custom_color = (r, g, b);
         }
     }
 }
@@ -1733,6 +1754,18 @@ impl Effect for Starfall {
             }
         }
     }
+
+    fn set_color_mode(&mut self, _mode: &str) {
+        unsafe {
+            GLOBAL_COLOR_CONFIG.mode = _mode.to_string();
+        }
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        unsafe {
+            GLOBAL_COLOR_CONFIG.custom_color = (r, g, b);
+        }
+    }
 }
 
 pub struct Heartbeat {
@@ -1965,6 +1998,18 @@ impl Effect for Heartbeat {
                     }
                 }
             }
+        }
+    }
+
+    fn set_color_mode(&mut self, _mode: &str) {
+        unsafe {
+            GLOBAL_COLOR_CONFIG.mode = _mode.to_string();
+        }
+    }
+
+    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
+        unsafe {
+            GLOBAL_COLOR_CONFIG.custom_color = (r, g, b);
         }
     }
 }
