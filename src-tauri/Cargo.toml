@@ -1,0 +1,48 @@
+[package]
+name = "dj_4led"
+version = "0.1.0"
+description = "LED audio visualizer with Tauri + Vue"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+
+[lib]
+name = "dj_4led_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Dépendances nécessaires à Tauri
+[dependencies]
+# Tauri
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Audio processing
+cpal = "0.15"
+rustfft = "6.1"
+apodize = "1.0"
+num-complex = "0.4"
+
+# Async and threading
+parking_lot = "0.12"
+tokio = { version = "1", features = ["full"] }
+rayon = "1.10"  # Pour le traitement parallèle
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Networking
+socket2 = "0.5"
+
+# Utilities
+rand = "0.8"
+bitflags = "2.0"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

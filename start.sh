@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# DJ-4LED - Version robuste avec reconnexion automatique
+# DJ-4LED - Version Tauri avec reconnexion automatique
 
-echo "🔄 DJ-4LED - Version Robuste"
-echo "============================"
+echo "🔄 DJ-4LED - Version Tauri"
+echo "=========================="
 
 # Couleurs
 GREEN='\033[0;32m'
@@ -14,8 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Variables
-BACKEND_PID=""
-FRONTEND_PID=""
+TAURI_PID=""
 MONITOR_PID=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESTART_COUNT=0
@@ -23,23 +22,10 @@ MAX_RESTARTS=10
 
 cd "$SCRIPT_DIR"
 
-# Détection de structure
-BACKEND_DIR="."
-FRONTEND_DIR="frontend"
-
-if [ -d "apps/backend" ]; then
-    BACKEND_DIR="apps/backend"
-    FRONTEND_DIR="apps/frontend"
-elif [ -d "backend" ]; then
-    BACKEND_DIR="backend"
-    FRONTEND_DIR="frontend"
-elif [ -d "src-tauri" ]; then
-    BACKEND_DIR="src-tauri"
-    FRONTEND_DIR="."
-fi
-
-echo -e "${CYAN}Backend: $BACKEND_DIR${NC}"
-echo -e "${CYAN}Frontend: $FRONTEND_DIR${NC}"
+# Architecture Tauri détectée
+echo -e "${CYAN}Architecture: Tauri (Frontend Vue + Backend Rust intégré)${NC}"
+echo -e "${CYAN}Frontend: src/ (Vue.js)${NC}"
+echo -e "${CYAN}Backend: src-tauri/ (Rust)${NC}"
 
 # Test contrôleurs LED plus robuste
 echo -e "${CYAN}Test des contrôleurs LED...${NC}"
@@ -49,6 +35,7 @@ CONTROLLERS_OK=0
 if [[ "$1" == "--force-production" || "$1" == "-p" ]]; then
     echo -e "${YELLOW}🔧 Mode production FORCÉ par argument${NC}"
     CONTROLLERS_OK=1
+    export TAURI_LED_MODE="production"
 else
     # Test des contrôleurs
     for ip in 192.168.1.45 192.168.1.46 192.168.1.47 192.168.1.48; do
@@ -77,104 +64,104 @@ fi
 echo ""
 if [ $CONTROLLERS_OK -gt 0 ]; then
     echo -e "${GREEN}✅ MODE PRODUCTION ACTIVÉ${NC}"
-    BACKEND_ARGS="--production"
+    export TAURI_LED_MODE="production"
     MODE_NAME="PRODUCTION"
 else
     echo -e "${YELLOW}⚠️ MODE SIMULATEUR${NC}"
-    echo -e "${CYAN}   Conseil: utilisez './start_robust.sh --force-production' pour forcer${NC}"
-    BACKEND_ARGS=""
+    echo -e "${CYAN}   Conseil: utilisez './start.sh --force-production' pour forcer${NC}"
+    export TAURI_LED_MODE="simulator"
     MODE_NAME="SIMULATEUR"
 fi
 
-# Build backend
-echo -e "${CYAN}Build du backend...${NC}"
-cd "$BACKEND_DIR"
+# Vérifier les dépendances
+echo -e "${CYAN}Vérification des dépendances...${NC}"
 
-BINARY_NAME="led-visualizer"
-if [ -f "Cargo.toml" ]; then
-    TOML_NAME=$(grep -E "^name\s*=" Cargo.toml | head -1 | sed 's/.*=\s*"\([^"]*\)".*/\1/' | tr '-' '_')
-    if [ ! -z "$TOML_NAME" ]; then
-        BINARY_NAME="$TOML_NAME"
-    fi
+# Vérifier Rust/Cargo
+if ! command -v cargo &> /dev/null; then
+    echo -e "${RED}❌ Cargo (Rust) non trouvé${NC}"
+    echo -e "${YELLOW}   Installez Rust: https://rustup.rs/${NC}"
+    exit 1
 fi
 
-if [ ! -f "target/release/$BINARY_NAME" ] || [ "src/main.rs" -nt "target/release/$BINARY_NAME" ]; then
-    echo "  Compilation..."
-    cargo build --release --quiet
+# Vérifier Node.js/pnpm
+if ! command -v pnpm &> /dev/null; then
+    echo -e "${RED}❌ pnpm non trouvé${NC}"
+    echo -e "${YELLOW}   Installez pnpm: npm install -g pnpm${NC}"
+    exit 1
+fi
+
+# Vérifier Tauri CLI
+if ! command -v cargo tauri &> /dev/null; then
+    echo -e "${YELLOW}⚠️ Tauri CLI non trouvé, installation...${NC}"
+    cargo install tauri-cli --quiet
+fi
+
+# Installation/mise à jour des dépendances
+echo -e "${CYAN}Installation des dépendances...${NC}"
+
+# Dépendances frontend
+if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules/.pnpm/registry.npmjs.org" ]; then
+    echo "  Installation dépendances frontend..."
+    pnpm install --silent
     if [ $? -ne 0 ]; then
-        echo -e "${RED}❌ Erreur compilation${NC}"
+        echo -e "${RED}❌ Erreur installation frontend${NC}"
         exit 1
     fi
 fi
 
-if [ ! -f "target/release/$BINARY_NAME" ]; then
-    echo -e "${RED}❌ Binaire non trouvé: target/release/$BINARY_NAME${NC}"
-    exit 1
+# Vérifier/build dépendances Rust
+echo "  Vérification dépendances Rust..."
+cd src-tauri
+if [ ! -d "target" ] || [ "Cargo.toml" -nt "target/.rustc_info.json" ]; then
+    echo "  Build des dépendances Rust..."
+    cargo check --quiet
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ Erreur dépendances Rust${NC}"
+        exit 1
+    fi
 fi
-
 cd "$SCRIPT_DIR"
 
-# Préparer frontend
-echo -e "${CYAN}Préparation du frontend...${NC}"
-cd "$FRONTEND_DIR"
+# Fonction de démarrage Tauri
+start_tauri() {
+    echo -e "${BLUE}🚀 Démarrage Tauri (tentative $((RESTART_COUNT + 1)))...${NC}"
 
-if [ ! -d "node_modules" ] || [ ! -f "node_modules/.pnpm/lock.yaml" 2>/dev/null ]; then
-    echo "  Installation des dépendances..."
-    pnpm install --silent
-fi
+    # Variables d'environnement pour le mode LED
+    export TAURI_LED_MODE="$TAURI_LED_MODE"
 
-cd "$SCRIPT_DIR"
-
-# Fonction de démarrage du backend
-start_backend() {
-    echo -e "${BLUE}🚀 Démarrage backend (tentative $((RESTART_COUNT + 1)))...${NC}"
-    cd "$BACKEND_DIR"
-
-    ./target/release/$BINARY_NAME $BACKEND_ARGS &
-    BACKEND_PID=$!
-
-    cd "$SCRIPT_DIR"
+    # Démarrer en mode développement
+    if [[ "$2" == "--release" || "$2" == "-r" ]]; then
+        echo -e "${CYAN}   Mode: Release (optimisé)${NC}"
+        pnpm tauri build --runner cargo &
+        TAURI_PID=$!
+    else
+        echo -e "${CYAN}   Mode: Development (hot-reload)${NC}"
+        pnpm tauri dev &
+        TAURI_PID=$!
+    fi
 
     # Attendre et vérifier le démarrage
-    sleep 3
-    if ! kill -0 $BACKEND_PID 2>/dev/null; then
-        echo -e "${RED}❌ Backend échec au démarrage${NC}"
+    sleep 8
+    if ! kill -0 $TAURI_PID 2>/dev/null; then
+        echo -e "${RED}❌ Tauri échec au démarrage${NC}"
         return 1
     fi
 
-    echo -e "${GREEN}✅ Backend démarré (PID: $BACKEND_PID, Mode: $MODE_NAME)${NC}"
-    return 0
-}
-
-# Fonction de démarrage du frontend
-start_frontend() {
-    echo -e "${BLUE}🎨 Démarrage frontend...${NC}"
-    cd "$FRONTEND_DIR"
-
-    pnpm run tauri dev >/dev/null 2>&1 &
-    FRONTEND_PID=$!
-
-    cd "$SCRIPT_DIR"
-
-    # Attendre et vérifier
-    sleep 5
-    if ! kill -0 $FRONTEND_PID 2>/dev/null; then
-        echo -e "${RED}❌ Frontend échec au démarrage${NC}"
-        return 1
-    fi
-
-    echo -e "${GREEN}✅ Frontend démarré (PID: $FRONTEND_PID)${NC}"
+    echo -e "${GREEN}✅ Tauri démarré (PID: $TAURI_PID, Mode LED: $MODE_NAME)${NC}"
     return 0
 }
 
 # Fonction de monitoring et reconnexion
 monitor_processes() {
+    local last_status_time=0
+
     while true; do
         sleep 10
+        local current_time=$(date +%s)
 
-        # Vérifier backend
-        if [ ! -z "$BACKEND_PID" ] && ! kill -0 $BACKEND_PID 2>/dev/null; then
-            echo -e "${RED}🔄 Backend arrêté - Redémarrage...${NC}"
+        # Vérifier Tauri
+        if [ ! -z "$TAURI_PID" ] && ! kill -0 $TAURI_PID 2>/dev/null; then
+            echo -e "${RED}🔄 Tauri arrêté - Redémarrage...${NC}"
             RESTART_COUNT=$((RESTART_COUNT + 1))
 
             if [ $RESTART_COUNT -gt $MAX_RESTARTS ]; then
@@ -182,20 +169,14 @@ monitor_processes() {
                 break
             fi
 
-            start_backend
-            sleep 2
+            start_tauri
+            sleep 5
         fi
 
-        # Vérifier frontend
-        if [ ! -z "$FRONTEND_PID" ] && ! kill -0 $FRONTEND_PID 2>/dev/null; then
-            echo -e "${RED}🔄 Frontend arrêté - Redémarrage...${NC}"
-            start_frontend
-            sleep 2
-        fi
-
-        # Statistiques périodiques
-        if [ $(($(date +%s) % 60)) -eq 0 ]; then
-            echo -e "${BLUE}💓 Status: Backend PID $BACKEND_PID, Frontend PID $FRONTEND_PID, Redémarrages: $RESTART_COUNT${NC}"
+        # Statistiques périodiques (toutes les minutes)
+        if [ $((current_time - last_status_time)) -ge 60 ]; then
+            echo -e "${BLUE}💓 Status: Tauri PID $TAURI_PID, Mode: $MODE_NAME, Redémarrages: $RESTART_COUNT${NC}"
+            last_status_time=$current_time
         fi
     done
 }
@@ -206,15 +187,20 @@ cleanup() {
     echo -e "${CYAN}🛑 Arrêt en cours...${NC}"
 
     [ ! -z "$MONITOR_PID" ] && kill $MONITOR_PID 2>/dev/null
-    [ ! -z "$FRONTEND_PID" ] && kill $FRONTEND_PID 2>/dev/null
-    [ ! -z "$BACKEND_PID" ] && kill $BACKEND_PID 2>/dev/null
+    [ ! -z "$TAURI_PID" ] && kill $TAURI_PID 2>/dev/null
 
     # Attendre un peu
-    sleep 2
+    sleep 3
 
     # Force kill si nécessaire
-    [ ! -z "$FRONTEND_PID" ] && kill -9 $FRONTEND_PID 2>/dev/null
-    [ ! -z "$BACKEND_PID" ] && kill -9 $BACKEND_PID 2>/dev/null
+    if [ ! -z "$TAURI_PID" ] && kill -0 $TAURI_PID 2>/dev/null; then
+        echo -e "${YELLOW}Force kill Tauri...${NC}"
+        kill -9 $TAURI_PID 2>/dev/null
+
+        # Tuer également les processus cargo/node associés
+        pkill -f "tauri dev" 2>/dev/null
+        pkill -f "cargo run" 2>/dev/null
+    fi
 
     echo -e "${GREEN}✅ Arrêt terminé${NC}"
     exit 0
@@ -222,22 +208,21 @@ cleanup() {
 
 trap cleanup INT TERM
 
+# Gestion des arguments
+RELEASE_MODE=""
+if [[ "$1" == "--release" || "$1" == "-r" || "$2" == "--release" || "$2" == "-r" ]]; then
+    RELEASE_MODE="--release"
+fi
+
 # Démarrage initial
 echo ""
 echo -e "${CYAN}======================================${NC}"
-echo -e "${CYAN}🚀 DÉMARRAGE DE DJ-4LED${NC}"
+echo -e "${CYAN}🚀 DÉMARRAGE DE DJ-4LED (TAURI)${NC}"
 echo -e "${CYAN}======================================${NC}"
 
-# Démarrer backend
-if ! start_backend; then
-    echo -e "${RED}❌ Impossible de démarrer le backend${NC}"
-    exit 1
-fi
-
-# Démarrer frontend
-if ! start_frontend; then
-    echo -e "${RED}❌ Impossible de démarrer le frontend${NC}"
-    cleanup
+# Démarrer Tauri
+if ! start_tauri "" "$RELEASE_MODE"; then
+    echo -e "${RED}❌ Impossible de démarrer Tauri${NC}"
     exit 1
 fi
 
@@ -248,17 +233,22 @@ MONITOR_PID=$!
 
 # Status final
 echo ""
-echo -e "${GREEN}🎉 DJ-4LED DÉMARRÉ AVEC SUCCÈS !${NC}"
+echo -e "${GREEN}🎉 DJ-4LED TAURI DÉMARRÉ AVEC SUCCÈS !${NC}"
 echo "═══════════════════════════════════════════════"
-echo -e "${CYAN}Backend:${NC}     PID $BACKEND_PID (Mode: $MODE_NAME)"
-echo -e "${CYAN}Frontend:${NC}    PID $FRONTEND_PID"
+echo -e "${CYAN}Application:${NC} PID $TAURI_PID"
+echo -e "${CYAN}Mode LED:${NC}    $MODE_NAME"
+echo -e "${CYAN}Frontend:${NC}    Vue.js (intégré)"
+echo -e "${CYAN}Backend:${NC}     Rust (intégré)"
 echo -e "${CYAN}Monitor:${NC}     PID $MONITOR_PID (Auto-restart activé)"
-echo -e "${CYAN}WebSocket:${NC}   ws://localhost:8080"
+echo -e "${CYAN}Interface:${NC}   Application native + webview"
 echo ""
-echo -e "${YELLOW}💡 Reconnexion automatique activée${NC}"
+echo -e "${YELLOW}💡 Architecture Tauri unifiée${NC}"
+echo -e "${YELLOW}💡 Hot-reload activé en mode dev${NC}"
+echo -e "${YELLOW}💡 Reconnexion LED automatique${NC}"
 echo -e "${YELLOW}💡 Maximum $MAX_RESTARTS redémarrages${NC}"
 echo -e "${YELLOW}💡 Ctrl+C pour tout arrêter${NC}"
 echo ""
+echo -e "${GREEN}🎵 Ready for LED Audio Visualization!${NC}"
 
 # Attendre
 wait $MONITOR_PID
