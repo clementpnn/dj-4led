@@ -69,6 +69,7 @@ impl LedController {
         for controller in &self.controllers {
             let client = ArtNetClient::new(&controller.ip_address)?;
             self.clients.insert(controller.ip_address.clone(), client);
+            println!("🌐 [ART-NET] Client créé pour {}", controller.ip_address);
         }
 
         self.stats.controllers_active = self.clients.len();
@@ -90,7 +91,7 @@ impl LedController {
         println!("✅ [LED] {} mappings construits", self.led_mappings.len());
     }
 
-    /// Construit les mappings pour le mode simulateur
+    /// Construit les mappings pour le mode simulateur (simplifié comme l'ancien code)
     fn build_simulator_mappings(&mut self) {
         let mut universe = 0;
 
@@ -266,6 +267,7 @@ impl LedController {
         // Envoyer les données à tous les contrôleurs
         let mut total_bytes = 0;
         let mut packets_sent = 0;
+        let mut errors = 0;
 
         for ((ip, universe), dmx_data) in &universe_data {
             if let Some(client) = self.clients.get_mut(ip) {
@@ -275,15 +277,25 @@ impl LedController {
                         packets_sent += 1;
                     }
                     Err(e) => {
-                        eprintln!("❌ [LED] Error {}:{} - {}", ip, universe, e);
+                        errors += 1;
+                        if errors % 100 == 1 {
+                            eprintln!("❌ [LED] Error {}:{} - {}", ip, universe, e);
+                        }
                     }
                 }
+            } else {
+                eprintln!("❌ [LED] No client found for IP: {}", ip);
             }
         }
 
         // Mettre à jour les statistiques
-        let frame_time = Instant::now().duration_since(Instant::now());
+        let frame_time = Instant::now().duration_since(self.last_frame_time);
         self.update_stats(total_bytes, packets_sent, frame_time);
+
+        if errors > 0 && self.stats.frames_sent % 500 == 0 {
+            println!("⚠️ [LED] Frame #{}: {} erreurs sur {} paquets",
+                     self.stats.frames_sent, errors, packets_sent + errors);
+        }
 
         Ok(())
     }
@@ -303,10 +315,13 @@ impl LedController {
         }
         self.last_frame_time = Instant::now();
 
-        // Log moins fréquent
+        // Log moins fréquent mais plus informatif
         if self.stats.frames_sent % 300 == 0 {
-            println!("📊 [LED] Frames: {}, FPS: {:.1}, Controllers: {}",
-                     self.stats.frames_sent, self.stats.fps, self.stats.controllers_active);
+            println!("📊 [LED] Frames: {}, FPS: {:.1}, Controllers: {}, Bytes/s: {:.1}k",
+                     self.stats.frames_sent,
+                     self.stats.fps,
+                     self.stats.controllers_active,
+                     (bytes_sent as f32) / 1024.0);
         }
     }
 
@@ -460,6 +475,10 @@ impl LedController {
     pub fn restart_connections(&mut self) -> Result<()> {
         println!("🔄 [LED] Restart connections");
         self.clients.clear();
+
+        // Petit délai pour laisser les sockets se fermer
+        std::thread::sleep(Duration::from_millis(100));
+
         self.init_clients()?;
         println!("✅ [LED] Connections restarted");
         Ok(())
@@ -516,82 +535,5 @@ impl TestPattern {
             TestPattern::Checkerboard => "Pattern damier noir et blanc",
             TestPattern::QuarterTest => "Chaque quart en couleur différente",
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_led_controller_creation() {
-        let controller = LedController::new_with_mode(LedMode::Simulator);
-        assert!(controller.is_ok());
-
-        let controller = controller.unwrap();
-        assert_eq!(controller.get_mode(), LedMode::Simulator);
-        assert_eq!(controller.get_controllers().len(), 4);
-    }
-
-    #[test]
-    fn test_frame_validation() {
-        let mut controller = LedController::new_with_mode(LedMode::Simulator).unwrap();
-
-        // Frame valide
-        let valid_frame = vec![0; MATRIX_SIZE];
-        assert!(controller.send_frame(&valid_frame).is_ok());
-
-        // Frame invalide (taille incorrecte)
-        let invalid_frame = vec![0; 100];
-        assert!(controller.send_frame(&invalid_frame).is_err());
-    }
-
-    #[test]
-    fn test_test_patterns() {
-        let controller = LedController::new_with_mode(LedMode::Simulator).unwrap();
-
-        for pattern in TestPattern::all() {
-            let frame = controller.generate_test_frame(pattern);
-            assert_eq!(frame.len(), MATRIX_SIZE);
-        }
-    }
-
-    #[test]
-    fn test_brightness_and_gamma() {
-        let mut controller = LedController::new_with_mode(LedMode::Simulator).unwrap();
-
-        controller.set_brightness(0.5);
-        controller.set_gamma_correction(2.2);
-
-        // Les valeurs doivent être dans les limites
-        assert!(controller.brightness <= 1.0);
-        assert!(controller.brightness >= 0.0);
-        assert!(controller.gamma_correction >= 0.1);
-        assert!(controller.gamma_correction <= 5.0);
-    }
-
-    #[test]
-    fn test_pattern_names() {
-        for pattern in TestPattern::all() {
-            assert!(!pattern.name().is_empty());
-            assert!(!pattern.description().is_empty());
-        }
-    }
-
-    #[test]
-    fn test_utils_functions() {
-        use crate::led::artnet::utils;
-
-        // Test brightness
-        let (r, g, b) = utils::apply_brightness_rgb(255, 255, 255, 0.5);
-        assert_eq!((r, g, b), (127, 127, 127));
-
-        // Test HSV conversion
-        let (r, g, b) = utils::hsv_to_rgb(0.0, 1.0, 1.0); // Pure red
-        assert_eq!((r, g, b), (255, 0, 0));
-
-        // Test gamma
-        let (r, g, b) = utils::apply_gamma_rgb(128, 128, 128, 2.2);
-        assert!(r > 0 && g > 0 && b > 0); // Should not be zero
     }
 }

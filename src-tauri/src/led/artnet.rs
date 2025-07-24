@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::net::UdpSocket;
-use std::time::Instant;
+use std::time::Duration;
 
 /// Client Art-Net pour l'envoi de données DMX
 pub struct ArtNetClient {
@@ -8,7 +8,6 @@ pub struct ArtNetClient {
     target_ip: String,
     packets_sent: u64,
     bytes_sent: u64,
-    last_log_time: Option<Instant>,
 }
 
 impl ArtNetClient {
@@ -16,15 +15,19 @@ impl ArtNetClient {
     pub fn new(target_ip: &str) -> Result<Self> {
         println!("🌐 [ART-NET] Client créé pour {}", target_ip);
 
+        // Créer socket avec configuration améliorée
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(false)?;
+
+        // Ajouter timeout pour éviter les blocages
+        socket.set_write_timeout(Some(Duration::from_millis(10)))?;
+        socket.set_broadcast(true)?; // Permet le broadcast si nécessaire
 
         Ok(Self {
             socket,
             target_ip: target_ip.to_string(),
             packets_sent: 0,
             bytes_sent: 0,
-            last_log_time: None,
         })
     }
 
@@ -33,57 +36,51 @@ impl ArtNetClient {
         // Validation des données
         if dmx_data.len() > 512 {
             let error = format!("DMX data too large: {} bytes (max 512)", dmx_data.len());
-            println!("❌ [ART-NET] Error: {}", error);
             anyhow::bail!(error);
         }
 
-        // Log périodique (toutes les 60 frames ou les 5 premières)
-        let should_log = self.packets_sent % 60 == 0 || self.packets_sent < 5;
-
-        if should_log {
-            println!("📡 [ART-NET] Send #{} -> Universe: {}, Size: {} bytes",
-                     self.packets_sent + 1, universe, dmx_data.len());
+        // Validation univers
+        if universe > 32767 {
+            let error = format!("Universe too large: {} (max 32767)", universe);
+            anyhow::bail!(error);
         }
 
         // Création du paquet Art-Net
         let packet = self.create_artnet_packet(universe, dmx_data);
         let addr = format!("{}:6454", self.target_ip);
 
-        // Envoi du paquet
-        match self.socket.send_to(&packet, &addr) {
-            Ok(bytes) => {
-                // Mise à jour des statistiques
-                self.packets_sent += 1;
-                self.bytes_sent += bytes as u64;
+        // Envoi du paquet avec retry en cas d'échec temporaire
+        let mut attempts = 0;
+        let max_attempts = 2;
 
-                if should_log {
-                    if let Some(last_time) = self.last_log_time {
-                        let elapsed = last_time.elapsed().as_secs_f32();
-                        if elapsed > 0.0 {
-                            let fps = 60.0 / elapsed;
-                            println!("  ✅ [ART-NET] FPS: {:.1}, Total: {} KB", fps, self.bytes_sent / 1024);
-                        }
-                    }
-                    self.last_log_time = Some(Instant::now());
+        loop {
+            match self.socket.send_to(&packet, &addr) {
+                Ok(bytes) => {
+                    // Mise à jour des statistiques
+                    self.packets_sent += 1;
+                    self.bytes_sent += bytes as u64;
+                    return Ok(bytes);
                 }
-
-                Ok(bytes)
-            }
-            Err(e) => {
-                let error = format!("Failed to send to {}: {}", addr, e);
-                println!("❌ [ART-NET] Send Error: {}", error);
-                Err(anyhow::anyhow!(error))
+                Err(e) => {
+                    attempts += 1;
+                    if attempts >= max_attempts {
+                        let error = format!("Failed to send to {} after {} attempts: {}", addr, attempts, e);
+                        return Err(anyhow::anyhow!(error));
+                    }
+                    // Petit délai avant retry
+                    std::thread::sleep(Duration::from_millis(1));
+                }
             }
         }
     }
 
-    /// Crée un paquet Art-Net complet
+    /// Crée un paquet Art-Net conforme aux spécifications
     fn create_artnet_packet(&self, universe: u16, dmx_data: &[u8]) -> Vec<u8> {
         let mut packet = Vec::with_capacity(18 + dmx_data.len());
 
-        // Header Art-Net selon la spécification
-        packet.extend_from_slice(b"Art-Net\0"); // 8 bytes - ID
-        packet.extend_from_slice(&[0x00, 0x50]); // 2 bytes - OpCode (ArtDMX = 0x5000)
+        // Header Art-Net selon la spécification officielle
+        packet.extend_from_slice(b"Art-Net\0"); // 8 bytes - ID string
+        packet.extend_from_slice(&[0x00, 0x50]); // 2 bytes - OpCode (ArtDMX = 0x5000 little endian)
         packet.extend_from_slice(&[0x00, 0x0E]); // 2 bytes - ProtVer (version 14)
         packet.push(0); // 1 byte - Sequence (0 = pas de séquençage)
         packet.push(0); // 1 byte - Physical (port physique)
@@ -105,41 +102,13 @@ impl ArtNetClient {
     pub fn get_stats(&self) -> (u64, u64) {
         (self.packets_sent, self.bytes_sent)
     }
-
-    /// Test de connectivité de base
-    pub fn test_connectivity(&mut self) -> Result<bool> {
-        println!("🔍 [ART-NET] Test connectivité {}", self.target_ip);
-
-        let test_data = vec![0; 12];
-
-        match self.send_universe(0, &test_data) {
-            Ok(bytes) => {
-                println!("  ✅ [ART-NET] Test réussi: {} bytes", bytes);
-                Ok(true)
-            }
-            Err(e) => {
-                println!("  ❌ [ART-NET] Test échoué: {}", e);
-                Ok(false)
-            }
-        }
-    }
 }
 
 /// Utilitaires pour la manipulation des couleurs LED
 pub mod utils {
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    static DEBUG_COUNTER: AtomicU32 = AtomicU32::new(0);
-
     /// Applique la correction de luminosité sur un pixel RGB
     pub fn apply_brightness_rgb(r: u8, g: u8, b: u8, brightness: f32) -> (u8, u8, u8) {
         let brightness = brightness.clamp(0.0, 1.0);
-
-        let counter = DEBUG_COUNTER.fetch_add(1, Ordering::Relaxed);
-        if counter % 5000 == 0 {
-            println!("🔆 [UTILS] Brightness: {:.2}", brightness);
-        }
-
         (
             (r as f32 * brightness) as u8,
             (g as f32 * brightness) as u8,
@@ -150,14 +119,11 @@ pub mod utils {
     /// Applique la correction gamma sur un pixel RGB
     pub fn apply_gamma_rgb(r: u8, g: u8, b: u8, gamma: f32) -> (u8, u8, u8) {
         let inv_gamma = 1.0 / gamma;
-
-        let result = (
+        (
             ((r as f32 / 255.0).powf(inv_gamma) * 255.0) as u8,
             ((g as f32 / 255.0).powf(inv_gamma) * 255.0) as u8,
             ((b as f32 / 255.0).powf(inv_gamma) * 255.0) as u8,
-        );
-
-        result
+        )
     }
 
     /// Applique une température de couleur

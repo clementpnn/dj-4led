@@ -49,7 +49,7 @@ pub fn run() {
         start_auto_audio(auto_audio_state);
     });
 
-    // 🔥 Démarrage automatique des LEDs en mode simulateur
+    // 🔥 Démarrage automatique des LEDs
     let auto_led_state = Arc::clone(&app_state);
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(1500)); // Attendre un peu plus
@@ -192,7 +192,7 @@ fn start_simulated_audio(state: Arc<AppState>) {
     println!("🎧 [AUTO-SIM] Thread audio simulé arrêté");
 }
 
-// 🔥 Fonction pour démarrer les LEDs automatiquement
+// 🔥 Fonction pour démarrer les LEDs automatiquement avec corrections
 fn start_auto_led(state: Arc<AppState>) {
     if *state.led_running.lock() {
         println!("🌐 [AUTO] LED déjà en cours, abandon");
@@ -201,9 +201,25 @@ fn start_auto_led(state: Arc<AppState>) {
 
     println!("🌐 [AUTO] Initialisation contrôleur LED...");
 
-    let mut led = match led::LedController::new_with_mode(led::LedMode::Simulator) {
-        Ok(controller) => {
-            println!("✅ [AUTO] Contrôleur LED initialisé en mode simulateur");
+    // Détecter le mode LED depuis l'environnement
+    let led_mode = match std::env::var("TAURI_LED_MODE").as_deref() {
+        Ok("production") => {
+            println!("🔧 [AUTO] Mode PRODUCTION détecté");
+            led::LedMode::Production
+        }
+        _ => {
+            println!("🔧 [AUTO] Mode SIMULATEUR par défaut");
+            led::LedMode::Simulator
+        }
+    };
+
+    let mut led = match led::LedController::new_with_mode(led_mode) {
+        Ok(mut controller) => {
+            println!("✅ [AUTO] Contrôleur LED initialisé");
+            // Test de connectivité initial
+            if let Err(e) = controller.test_connectivity() {
+                println!("⚠️ [AUTO] Test connectivité échoué: {}", e);
+            }
             controller
         }
         Err(e) => {
@@ -215,22 +231,51 @@ fn start_auto_led(state: Arc<AppState>) {
     *state.led_running.lock() = true;
     let mut frame_count = 0u64;
     let start_time = std::time::Instant::now();
+    let mut consecutive_errors = 0;
+    let max_consecutive_errors = 10;
+
+    println!("🌐 [AUTO] Démarrage boucle LED...");
 
     while *state.led_running.lock() {
         let frame = state.led_frame.lock().clone();
 
-        if let Err(e) = led.send_frame(&frame) {
-            eprintln!("❌ [AUTO] Erreur envoi frame LED: {}", e);
+        // Meilleure gestion d'erreur avec reconnexion automatique
+        match led.send_frame(&frame) {
+            Ok(_) => {
+                consecutive_errors = 0; // Reset compteur d'erreurs
+            }
+            Err(e) => {
+                consecutive_errors += 1;
+                eprintln!("❌ [AUTO] Erreur envoi frame LED #{}: {}", consecutive_errors, e);
+
+                // Si trop d'erreurs consécutives, tenter une reconnexion
+                if consecutive_errors >= max_consecutive_errors {
+                    println!("🔄 [AUTO] Trop d'erreurs, tentative de reconnexion...");
+                    if let Err(reconnect_err) = led.restart_connections() {
+                        eprintln!("❌ [AUTO] Échec reconnexion: {}", reconnect_err);
+                        // Attendre plus longtemps avant de continuer
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
+                    } else {
+                        println!("✅ [AUTO] Reconnexion réussie");
+                        consecutive_errors = 0;
+                    }
+                }
+            }
         }
 
         frame_count += 1;
+
+        // Statistiques plus détaillées
         if frame_count % 100 == 0 {
             let elapsed = start_time.elapsed().as_secs_f64();
             let fps = frame_count as f64 / elapsed;
-            println!("📊 [AUTO] LED FPS: {:.1} | Frames: {}", fps, frame_count);
+            let stats = led.get_stats();
+            println!("📊 [AUTO] LED FPS: {:.1} | Frames: {} | Packets: {} | Errors: {}",
+                     fps, frame_count, stats.packets_sent, consecutive_errors);
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(13)); // ~75 FPS
+        // Framerate plus stable
+        std::thread::sleep(std::time::Duration::from_millis(13)); // ~77 FPS
     }
 
     println!("🌐 [AUTO] Thread LED arrêté");
