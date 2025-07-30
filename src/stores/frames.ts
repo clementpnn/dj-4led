@@ -1,11 +1,10 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, readonly, ref } from 'vue';
 import { APP_CONFIG } from '../config';
 import type { FrameData, FrameMetrics, FrameStats } from '../types';
 
 export const useFramesStore = defineStore('frames', () => {
 	// ===== STATE =====
-
 	const currentFrame = ref<FrameData | null>(null);
 	const frameHistory = ref<FrameData[]>([]);
 	const stats = ref<FrameStats>({
@@ -18,15 +17,18 @@ export const useFramesStore = defineStore('frames', () => {
 	const loading = ref(false);
 
 	// ===== GETTERS =====
-
 	const hasCurrentFrame = computed(() => currentFrame.value !== null);
-
 	const frameCount = computed(() => frameHistory.value.length);
 
 	const averageFPS = computed(() => {
 		if (frameHistory.value.length < 2) return 0;
 
-		const timeSpan = frameHistory.value[frameHistory.value.length - 1].timestamp - frameHistory.value[0].timestamp;
+		const lastFrame = frameHistory.value[frameHistory.value.length - 1];
+		const firstFrame = frameHistory.value[0];
+
+		if (!lastFrame || !firstFrame) return 0;
+
+		const timeSpan = lastFrame.timestamp - firstFrame.timestamp;
 		return timeSpan > 0 ? (frameHistory.value.length * 1000) / timeSpan : 0;
 	});
 
@@ -46,7 +48,6 @@ export const useFramesStore = defineStore('frames', () => {
 	const recentFrames = computed(() => frameHistory.value.slice(-5));
 
 	// ===== ACTIONS =====
-
 	const setCurrentFrame = (frame: FrameData | null) => {
 		currentFrame.value = frame;
 
@@ -72,7 +73,7 @@ export const useFramesStore = defineStore('frames', () => {
 	};
 
 	const updateStats = (newStats: Partial<FrameStats>) => {
-		stats.value = { ...stats.value, ...newStats };
+		Object.assign(stats.value, newStats);
 	};
 
 	const incrementDroppedFrames = () => {
@@ -102,10 +103,10 @@ export const useFramesStore = defineStore('frames', () => {
 
 	return {
 		// State
-		currentFrame,
-		frameHistory,
-		stats,
-		loading,
+		currentFrame: readonly(currentFrame),
+		frameHistory: readonly(frameHistory),
+		stats: readonly(stats),
+		loading: readonly(loading),
 
 		// Getters
 		hasCurrentFrame,

@@ -109,6 +109,12 @@ export const COLOR_MODES: ColorMode[] = [
 		description: 'Sunset colors from orange to purple',
 	},
 	{
+		value: 'matrix',
+		label: 'Matrix',
+		emoji: '🌿',
+		description: 'Green matrix style colors',
+	},
+	{
 		value: 'custom',
 		label: 'Custom',
 		emoji: '🎨',

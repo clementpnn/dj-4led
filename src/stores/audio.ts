@@ -1,11 +1,10 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, readonly, ref } from 'vue';
 import { DEFAULT_AUDIO_CONFIG } from '../config';
 import type { AudioState, AudioStats } from '../types';
 
 export const useAudioStore = defineStore('audio', () => {
 	// ===== STATE =====
-
 	const state = ref<AudioState>({
 		isCapturing: false,
 		devices: [],
@@ -26,31 +25,34 @@ export const useAudioStore = defineStore('audio', () => {
 	const selectedDeviceIndex = ref<number | null>(null);
 
 	// ===== GETTERS =====
-
 	const isHealthy = computed(() => state.value.isCapturing && state.value.spectrum.length > 0 && !state.value.error);
 
-	const spectrumPeak = computed(() => (state.value.spectrum.length > 0 ? Math.max(...state.value.spectrum) : 0));
+	const spectrumPeak = computed(() => {
+		if (!state.value.isCapturing || state.value.spectrum.length === 0) return 0;
+		const peak = Math.max(...state.value.spectrum);
+		return Math.min(1.0, peak);
+	});
 
 	const spectrumRMS = computed(() => {
-		if (state.value.spectrum.length === 0) return 0;
+		if (!state.value.isCapturing || state.value.spectrum.length === 0) return 0;
 		const sum = state.value.spectrum.reduce((acc, val) => acc + val * val, 0);
-		return Math.sqrt(sum / state.value.spectrum.length);
+		const rms = Math.sqrt(sum / state.value.spectrum.length);
+		return Math.min(1.0, rms);
 	});
 
 	const selectedDevice = computed(() =>
 		selectedDeviceIndex.value !== null && state.value.devices[selectedDeviceIndex.value]
 			? state.value.devices[selectedDeviceIndex.value]
-			: null
+			: 'Auto-detect'
 	);
 
 	// ===== ACTIONS =====
-
 	const updateState = (newState: Partial<AudioState>) => {
-		state.value = { ...state.value, ...newState };
+		Object.assign(state.value, newState);
 	};
 
 	const updateStats = (newStats: Partial<AudioStats>) => {
-		stats.value = { ...stats.value, ...newStats };
+		Object.assign(stats.value, newStats);
 	};
 
 	const setLoading = (isLoading: boolean) => {
@@ -86,8 +88,10 @@ export const useAudioStore = defineStore('audio', () => {
 	};
 
 	const updateSpectrum = (spectrum: number[]) => {
-		if (spectrum && spectrum.length > 0) {
+		if (state.value.isCapturing && spectrum?.length > 0) {
 			state.value.spectrum = spectrum.slice(0, DEFAULT_AUDIO_CONFIG.spectrumBands);
+		} else if (!state.value.isCapturing) {
+			state.value.spectrum = [];
 		}
 	};
 
@@ -114,10 +118,10 @@ export const useAudioStore = defineStore('audio', () => {
 
 	return {
 		// State
-		state,
-		stats,
-		loading,
-		selectedDeviceIndex,
+		state: readonly(state),
+		stats: readonly(stats),
+		loading: readonly(loading),
+		selectedDeviceIndex: readonly(selectedDeviceIndex),
 
 		// Getters
 		isHealthy,

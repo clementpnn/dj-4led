@@ -1,131 +1,106 @@
+// stores/presets.ts
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
-import type { Preset, PresetCategory, PresetConfig } from '../types';
+import { computed, readonly, ref } from 'vue';
+import type { Preset } from '../types';
 
 export const usePresetsStore = defineStore('presets', () => {
 	// ===== STATE =====
-
 	const presets = ref<Preset[]>([]);
 	const currentPreset = ref<Preset | null>(null);
-	const categories = ref<PresetCategory[]>([]);
 	const loading = ref(false);
 
 	// Default presets
 	const defaultPresets: Preset[] = [
 		{
-			id: 'spectrum-rainbow',
-			name: 'Spectrum Rainbow',
-			description: 'Classic spectrum bars with rainbow colors',
-			config: {
-				effect: { id: 0, name: 'SpectrumBars' },
-				color: { mode: 'rainbow' },
-				audio: { gain: 1.0 },
-				led: { brightness: 0.8, mode: 'simulator' },
-			},
-			createdAt: Date.now(),
-			tags: ['default', 'spectrum', 'rainbow'],
-		},
-		{
-			id: 'fire-waves',
-			name: 'Fire Waves',
-			description: 'Circular waves with fire colors',
-			config: {
-				effect: { id: 1, name: 'CircularWave' },
-				color: { mode: 'fire' },
-				audio: { gain: 1.5 },
-				led: { brightness: 0.9, mode: 'simulator' },
-			},
-			createdAt: Date.now(),
-			tags: ['default', 'ambient', 'fire'],
-		},
-		{
-			id: 'ocean-particles',
-			name: 'Ocean Particles',
-			description: 'Particle system with ocean colors',
+			id: 'party-mode',
+			name: 'Party Mode',
+			description: 'High energy setup with vibrant colors and dynamic effects',
 			config: {
 				effect: { id: 2, name: 'ParticleSystem' },
-				color: { mode: 'ocean' },
-				audio: { gain: 1.2 },
-				led: { brightness: 0.7, mode: 'simulator' },
-			},
-			createdAt: Date.now(),
-			tags: ['default', 'particle', 'ocean'],
-		},
-		{
-			id: 'custom-red',
-			name: 'Custom Red',
-			description: 'Heartbeat effect with custom red color',
-			config: {
-				effect: { id: 3, name: 'Heartbeat' },
-				color: { mode: 'custom', customColor: { r: 1, g: 0, b: 0 } },
-				audio: { gain: 0.8 },
+				color: { mode: 'rainbow' },
+				audio: { gain: 2.0 },
 				led: { brightness: 1.0, mode: 'simulator' },
 			},
 			createdAt: Date.now(),
-			tags: ['default', 'rhythm', 'custom'],
+			tags: ['party', 'high-energy'],
+		},
+		{
+			id: 'chill-mode',
+			name: 'Chill Mode',
+			description: 'Relaxed setup with calm ocean colors',
+			config: {
+				effect: { id: 1, name: 'CircularWave' },
+				color: { mode: 'ocean' },
+				audio: { gain: 1.0 },
+				led: { brightness: 0.6, mode: 'simulator' },
+			},
+			createdAt: Date.now(),
+			tags: ['chill', 'relaxed'],
+		},
+		{
+			id: 'focus-mode',
+			name: 'Focus Mode',
+			description: 'Minimal distraction setup for concentration',
+			config: {
+				effect: { id: 0, name: 'SpectrumBars' },
+				color: { mode: 'custom', customColor: { r: 0.2, g: 0.4, b: 0.8 } },
+				audio: { gain: 0.8 },
+				led: { brightness: 0.4, mode: 'simulator' },
+			},
+			createdAt: Date.now(),
+			tags: ['focus', 'minimal'],
+		},
+		{
+			id: 'gaming-mode',
+			name: 'Gaming Mode',
+			description: 'Responsive setup optimized for gaming',
+			config: {
+				effect: { id: 6, name: 'Flames' },
+				color: { mode: 'fire' },
+				audio: { gain: 1.5 },
+				led: { brightness: 0.8, mode: 'production' },
+			},
+			createdAt: Date.now(),
+			tags: ['gaming', 'responsive'],
 		},
 	];
 
 	// ===== GETTERS =====
-
 	const allPresets = computed(() => [...defaultPresets, ...presets.value]);
 
-	const customPresets = computed(() =>
-		presets.value.filter((preset) => !defaultPresets.find((dp) => dp.id === preset.id))
-	);
-
-	const presetsByCategory = computed(() => {
-		const categorized: Record<string, Preset[]> = {
-			default: defaultPresets,
-			custom: customPresets.value,
-		};
-
-		categories.value.forEach((category) => {
-			categorized[category.id] = category.presets;
+	const availableTags = computed(() => {
+		const tags = new Set<string>();
+		allPresets.value.forEach((preset) => {
+			preset.tags?.forEach((tag) => tags.add(tag));
 		});
-
-		return categorized;
+		return Array.from(tags).sort();
 	});
 
-	const getPresetById = computed(() => (id: string) => allPresets.value.find((preset) => preset.id === id));
-
-	const isDefaultPreset = computed(() => (id: string) => defaultPresets.some((preset) => preset.id === id));
-
 	// ===== ACTIONS =====
-
-	const setPresets = (newPresets: Preset[]) => {
-		presets.value = newPresets;
-	};
-
 	const addPreset = (preset: Preset) => {
-		// Ensure unique ID
-		if (!getPresetById.value(preset.id)) {
-			presets.value.push(preset);
-			saveToStorage();
+		// Check for duplicate names
+		const exists = allPresets.value.some((p) => p.name.toLowerCase() === preset.name.toLowerCase());
+		if (exists) {
+			console.warn('Preset name already exists');
+			return false;
 		}
+
+		presets.value.push(preset);
+		saveToStorage();
+		return true;
 	};
 
-	const updatePreset = (id: string, updates: Partial<Preset>) => {
-		const index = presets.value.findIndex((p) => p.id === id);
-		if (index !== -1) {
-			presets.value[index] = {
-				...presets.value[index],
-				...updates,
-				updatedAt: Date.now(),
-			};
-			saveToStorage();
+	const deletePreset = (id: string) => {
+		// Prevent deletion of default presets
+		if (defaultPresets.some((p) => p.id === id)) {
+			console.warn('Cannot delete default preset');
+			return false;
 		}
-	};
-
-	const removePreset = (id: string) => {
-		// Don't allow removal of default presets
-		if (isDefaultPreset.value(id)) return false;
 
 		const index = presets.value.findIndex((p) => p.id === id);
 		if (index !== -1) {
 			presets.value.splice(index, 1);
 
-			// Clear current preset if it was deleted
 			if (currentPreset.value?.id === id) {
 				currentPreset.value = null;
 			}
@@ -140,130 +115,147 @@ export const usePresetsStore = defineStore('presets', () => {
 		currentPreset.value = preset;
 	};
 
-	const createPreset = (name: string, description: string, config: PresetConfig): Preset => {
-		const preset: Preset = {
-			id: `custom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-			name,
-			description,
-			config,
-			createdAt: Date.now(),
-			author: 'User',
-			tags: ['custom'],
-		};
-
-		addPreset(preset);
-		return preset;
-	};
-
-	const duplicatePreset = (id: string, newName?: string): Preset | null => {
-		const original = getPresetById.value(id);
-		if (!original) return null;
+	const duplicatePreset = (id: string, newName: string) => {
+		const original = allPresets.value.find((p) => p.id === id);
+		if (!original) {
+			console.warn('Preset not found');
+			return null;
+		}
 
 		const duplicate: Preset = {
 			...original,
-			id: `custom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-			name: newName || `${original.name} (Copy)`,
+			id: `preset-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+			name: newName,
+			description: `Copy of ${original.description}`,
 			createdAt: Date.now(),
-			tags: [...(original.tags || []), 'duplicate'],
+			updatedAt: undefined,
 		};
 
-		addPreset(duplicate);
-		return duplicate;
+		const success = addPreset(duplicate);
+		return success ? duplicate : null;
 	};
 
-	const setLoading = (isLoading: boolean) => {
-		loading.value = isLoading;
+	const getPresetById = (id: string): Preset | undefined => {
+		return allPresets.value.find((p) => p.id === id);
 	};
 
-	const initializeFromStorage = () => {
-		try {
-			const stored = localStorage.getItem('dj4led-presets');
-			if (stored) {
-				const parsedPresets = JSON.parse(stored);
-				if (Array.isArray(parsedPresets)) {
-					presets.value = parsedPresets;
-				}
-			}
-		} catch (error) {
-			console.error('Failed to load presets from storage:', error);
-			presets.value = [];
-		}
-	};
+	const exportPresets = (includeDefaults = false): string => {
+		const presetsToExport = includeDefaults ? allPresets.value : presets.value;
 
-	const saveToStorage = () => {
-		try {
-			localStorage.setItem('dj4led-presets', JSON.stringify(presets.value));
-		} catch (error) {
-			console.error('Failed to save presets to storage:', error);
-		}
-	};
-
-	const exportPresets = (): string => {
 		return JSON.stringify(
 			{
-				version: '2.0.0',
-				exported: Date.now(),
-				presets: presets.value,
+				version: '1.0',
+				exported_at: new Date().toISOString(),
+				total_presets: presetsToExport.length,
+				presets: presetsToExport,
 			},
 			null,
 			2
 		);
 	};
 
-	const importPresets = (data: string): boolean => {
+	const importPresets = (data: string): { imported: number; skipped: number } => {
 		try {
-			const parsed = JSON.parse(data);
-			if (parsed.presets && Array.isArray(parsed.presets)) {
-				// Merge with existing presets, avoiding duplicates
-				parsed.presets.forEach((preset: Preset) => {
-					if (!getPresetById.value(preset.id)) {
-						presets.value.push(preset);
-					}
-				});
-				saveToStorage();
-				return true;
+			const importData = JSON.parse(data);
+
+			if (!importData.presets || !Array.isArray(importData.presets)) {
+				throw new Error('Invalid preset data format');
 			}
+
+			let imported = 0;
+			let skipped = 0;
+
+			importData.presets.forEach((presetData: any) => {
+				// Validate preset structure
+				if (!presetData.name || !presetData.config) {
+					skipped++;
+					return;
+				}
+
+				// Check for duplicate names
+				const exists = allPresets.value.some((p) => p.name.toLowerCase() === presetData.name.toLowerCase());
+
+				if (exists) {
+					skipped++;
+					return;
+				}
+
+				// Create new preset with new ID and timestamp
+				const preset: Preset = {
+					...presetData,
+					id: `imported-${Date.now()}-${imported}`,
+					createdAt: Date.now(),
+					updatedAt: undefined,
+				};
+
+				presets.value.push(preset);
+				imported++;
+			});
+
+			if (imported > 0) {
+				saveToStorage();
+			}
+
+			return { imported, skipped };
 		} catch (error) {
-			console.error('Failed to import presets:', error);
+			throw new Error('Failed to parse preset data');
 		}
-		return false;
 	};
 
-	const reset = () => {
-		presets.value = [];
+	// ===== STORAGE =====
+	const saveToStorage = () => {
+		try {
+			localStorage.setItem('dj4led-presets', JSON.stringify(presets.value));
+		} catch (error) {
+			console.warn('Failed to save presets to storage:', error);
+		}
+	};
+
+	const loadFromStorage = () => {
+		try {
+			const stored = localStorage.getItem('dj4led-presets');
+			if (stored) {
+				const data = JSON.parse(stored);
+				if (Array.isArray(data)) {
+					presets.value = data;
+				}
+			}
+		} catch (error) {
+			console.warn('Failed to load presets from storage:', error);
+		}
+	};
+
+	const clearLogs = () => {
+		presets.value.splice(0, presets.value.length);
 		currentPreset.value = null;
-		categories.value = [];
 		loading.value = false;
-		localStorage.removeItem('dj4led-presets');
+
+		try {
+			localStorage.removeItem('dj4led-presets');
+		} catch (error) {
+			console.warn('Failed to clear presets storage:', error);
+		}
 	};
 
 	return {
 		// State
-		presets,
-		currentPreset,
-		categories,
-		loading,
+		presets: readonly(presets),
+		currentPreset: readonly(currentPreset),
+		loading: readonly(loading),
 
 		// Getters
 		allPresets,
-		customPresets,
-		presetsByCategory,
-		getPresetById,
-		isDefaultPreset,
+		availableTags,
 
 		// Actions
-		setPresets,
 		addPreset,
-		updatePreset,
-		removePreset,
+		deletePreset,
 		setCurrentPreset,
-		createPreset,
 		duplicatePreset,
-		setLoading,
-		initializeFromStorage,
-		saveToStorage,
+		getPresetById,
 		exportPresets,
 		importPresets,
-		reset,
+		loadFromStorage,
+		clearLogs,
 	};
 });

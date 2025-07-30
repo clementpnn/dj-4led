@@ -1,210 +1,353 @@
+// src-tauri/src/commands/led.rs
+
 use crate::AppState;
 use serde_json::json;
-use tauri::State;
+use tauri::{Emitter, State, Window};
+use std::time::Duration;
 
 #[tauri::command]
-pub async fn start_led_output(
+pub async fn led_start_output(
+    window: Window,
     state: State<'_, AppState>,
-    mode: String, // "simulator" or "production"
-) -> Result<String, String> {
-    let is_running = *state.led_running.lock();
-    if is_running {
-        return Ok("LED output already running".to_string());
+    mode: String,
+) -> Result<serde_json::Value, String> {
+    println!("🚀 [LED] Start output requested - Mode: {}", mode);
+
+    if *state.led_running.lock() {
+        return Ok(json!({
+            "status": "already_running",
+            "mode": state.led_mode.lock().clone()
+        }));
     }
 
-    *state.led_running.lock() = true;
-
     let led_mode = match mode.as_str() {
-        "production" => crate::led::LedMode::Production,
-        _ => crate::led::LedMode::Simulator,
+        "production" => {
+            println!("🏭 [LED] Production mode activated");
+            crate::led::LedMode::Production
+        }
+        _ => {
+            println!("🧪 [LED] Simulator mode activated");
+            crate::led::LedMode::Simulator
+        }
     };
 
-    let mode_clone = mode.clone();
-    // FIX: Clone la AppState directement
+    *state.led_running.lock() = true;
+    *state.led_mode.lock() = mode.clone();
+
     let app_state = state.inner().clone();
+    let led_window = window.clone();
+    let mode_clone = mode.clone();
 
     std::thread::spawn(move || {
         match crate::led::LedController::new_with_mode(led_mode) {
-            Ok(mut led) => {
-                println!("LED controller started in {} mode", mode_clone);
+            Ok(mut led_controller) => {
+                println!("✅ [LED] Controller created successfully");
+
+                // Initial connectivity test
+                if let Ok(results) = led_controller.test_connectivity() {
+                    let successful = results.values().filter(|&&v| v).count();
+                    let _ = led_window.emit("led_status", json!({
+                        "status": "started",
+                        "mode": mode_clone,
+                        "controllers_tested": results.len(),
+                        "controllers_working": successful
+                    }));
+                }
+
+                let mut last_stats_emit = std::time::Instant::now();
                 let mut frame_count = 0u64;
-                let start_time = std::time::Instant::now();
 
-                loop {
-                    if !*app_state.led_running.lock() {
-                        break;
-                    }
-
+                while *app_state.led_running.lock() {
                     let frame = app_state.led_frame.lock().clone();
-                    if let Err(e) = led.send_frame(&frame) {
-                        eprintln!("Error sending frame: {}", e);
+                    let brightness = *app_state.led_brightness.lock();
+
+                    // Apply brightness if needed
+                    if brightness != 1.0 {
+                        let adjusted_frame: Vec<u8> = frame.iter()
+                            .map(|&byte| ((byte as f32) * brightness) as u8)
+                            .collect();
+                        led_controller.send_frame(&adjusted_frame);
+                    } else {
+                        led_controller.send_frame(&frame);
                     }
 
                     frame_count += 1;
-                    if frame_count % 100 == 0 {
-                        let elapsed = start_time.elapsed().as_secs_f64();
-                        let fps = frame_count as f64 / elapsed;
-                        println!("LED FPS: {:.1}", fps);
+
+                    // Emit stats every 2 seconds
+                    if last_stats_emit.elapsed() > Duration::from_millis(2000) {
+                        let stats = led_controller.get_stats();
+                        let _ = led_window.emit("led_stats", json!({
+                            "fps": stats.fps,
+                            "frames_sent": stats.frames_sent,
+                            "packets_sent": stats.packets_sent,
+                            "bytes_sent": stats.bytes_sent,
+                            "frame_count": frame_count
+                        }));
+                        last_stats_emit = std::time::Instant::now();
                     }
 
-                    std::thread::sleep(std::time::Duration::from_millis(16)); // ~60 FPS
+                    std::thread::sleep(Duration::from_millis(crate::led::FRAME_TIME_MS));
                 }
 
-                println!("LED output stopped");
+                // Clean shutdown
+                println!("🛑 [LED] Stopping output");
+                let _ = led_controller.clear();
+                let _ = led_window.emit("led_status", json!({ "status": "stopped" }));
             }
             Err(e) => {
-                eprintln!("Failed to start LED controller: {}", e);
+                println!("❌ [LED] Failed to create controller: {}", e);
                 *app_state.led_running.lock() = false;
+                let _ = led_window.emit("led_status", json!({
+                    "status": "error",
+                    "error": e
+                }));
             }
         }
     });
 
-    Ok(format!("LED output started in {} mode", mode))
+    Ok(json!({
+        "status": "starting",
+        "mode": mode,
+        "target_fps": crate::led::TARGET_FPS,
+        "matrix_size": format!("{}x{}", crate::led::MATRIX_WIDTH, crate::led::MATRIX_HEIGHT)
+    }))
 }
 
 #[tauri::command]
-pub async fn stop_led_output(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn led_stop_output(
+    window: Window,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🛑 [LED] Stop output requested");
+
     *state.led_running.lock() = false;
-    Ok("LED output stopped".to_string())
+
+    let _ = window.emit("led_status", json!({ "status": "stopping" }));
+
+    // Wait for thread to finish
+    std::thread::sleep(Duration::from_millis(200));
+
+    Ok(json!({ "status": "stopped" }))
 }
 
 #[tauri::command]
-pub async fn is_led_running(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(*state.led_running.lock())
-}
-
-#[tauri::command]
-pub async fn set_led_brightness(
+pub async fn led_set_brightness(
+    window: Window,
     state: State<'_, AppState>,
     brightness: f32,
-) -> Result<String, String> {
-    if !(0.0..=1.0).contains(&brightness) {
-        return Err("Brightness must be between 0.0 and 1.0".to_string());
-    }
+) -> Result<serde_json::Value, String> {
+    crate::led::validate_brightness(brightness)
+        .map_err(|e| format!("Invalid brightness: {}", e))?;
 
     *state.led_brightness.lock() = brightness;
-    Ok(format!("LED brightness set to {:.1}%", brightness * 100.0))
+    println!("💡 [LED] Brightness set to {:.1}%", brightness * 100.0);
+
+    let _ = window.emit("led_brightness_changed", json!({
+        "brightness": brightness,
+        "percentage": brightness * 100.0
+    }));
+
+    Ok(json!({
+        "brightness": brightness,
+        "percentage": brightness * 100.0
+    }))
 }
 
 #[tauri::command]
-pub async fn get_led_brightness(state: State<'_, AppState>) -> Result<f32, String> {
-    Ok(*state.led_brightness.lock())
+pub async fn led_get_brightness(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let brightness = *state.led_brightness.lock();
+    Ok(json!({
+        "brightness": brightness,
+        "percentage": brightness * 100.0
+    }))
 }
 
 #[tauri::command]
-pub async fn test_led_pattern(
+pub async fn led_send_test_pattern(
+    window: Window,
     state: State<'_, AppState>,
     pattern: String,
-) -> Result<String, String> {
-    let test_pattern = match pattern.as_str() {
-        "red" => crate::led::TestPattern::AllRed,
-        "green" => crate::led::TestPattern::AllGreen,
-        "blue" => crate::led::TestPattern::AllBlue,
-        "white" => crate::led::TestPattern::AllWhite,
-        "gradient" => crate::led::TestPattern::Gradient,
-        "checkerboard" => crate::led::TestPattern::Checkerboard,
-        "quarter" => crate::led::TestPattern::QuarterTest,
-        _ => return Err("Unknown pattern. Available: red, green, blue, white, gradient, checkerboard, quarter".to_string()),
-    };
+    duration_ms: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let duration = duration_ms.unwrap_or(3000);
+    println!("🎨 [LED] Test pattern '{}' for {} ms", pattern, duration);
 
-    // Générer la frame de test
-    let frame = generate_test_frame_manual(test_pattern);
-    *state.led_frame.lock() = frame;
+    let original_frame = state.led_frame.lock().clone();
 
-    Ok(format!("Test pattern '{}' applied", pattern))
-}
+    let _ = window.emit("led_test_started", json!({
+        "pattern": pattern,
+        "duration_ms": duration
+    }));
 
-// Fonction helper pour générer les frames de test manuellement
-fn generate_test_frame_manual(pattern: crate::led::TestPattern) -> Vec<u8> {
-    let mut frame = vec![0; 128 * 128 * 3];
+    // Create test pattern
+    let test_frame = crate::led::create_test_pattern(
+        &pattern,
+        crate::led::MATRIX_WIDTH,
+        crate::led::MATRIX_HEIGHT
+    );
 
-    match pattern {
-        crate::led::TestPattern::AllRed => {
-            for i in (0..frame.len()).step_by(3) {
-                frame[i] = 255; // Red
-            }
-        }
-        crate::led::TestPattern::AllGreen => {
-            for i in (1..frame.len()).step_by(3) {
-                frame[i] = 255; // Green
-            }
-        }
-        crate::led::TestPattern::AllBlue => {
-            for i in (2..frame.len()).step_by(3) {
-                frame[i] = 255; // Blue
-            }
-        }
-        crate::led::TestPattern::AllWhite => {
-            frame.fill(255); // All channels
-        }
-        crate::led::TestPattern::Gradient => {
-            for y in 0..128 {
-                for x in 0..128 {
-                    let i = (y * 128 + x) * 3;
-                    frame[i] = (x * 255 / 128) as u8;     // Red gradient
-                    frame[i + 1] = (y * 255 / 128) as u8; // Green gradient
-                    frame[i + 2] = 128;                    // Blue constant
-                }
-            }
-        }
-        crate::led::TestPattern::Checkerboard => {
-            for y in 0..128 {
-                for x in 0..128 {
-                    let i = (y * 128 + x) * 3;
-                    let is_white = (x / 8 + y / 8) % 2 == 0;
-                    let value = if is_white { 255 } else { 0 };
-                    frame[i] = value;     // R
-                    frame[i + 1] = value; // G
-                    frame[i + 2] = value; // B
-                }
-            }
-        }
-        crate::led::TestPattern::QuarterTest => {
-            // Chaque quart de l'écran en couleur différente
-            for y in 0..128 {
-                for x in 0..128 {
-                    let i = (y * 128 + x) * 3;
+    *state.led_frame.lock() = test_frame;
 
-                    let (r, g, b) = match (x < 64, y < 64) {
-                        (true, true) => (255, 0, 0),   // Haut-gauche: Rouge
-                        (false, true) => (0, 255, 0),  // Haut-droite: Vert
-                        (true, false) => (0, 0, 255),  // Bas-gauche: Bleu
-                        (false, false) => (255, 255, 0), // Bas-droite: Jaune
-                    };
+    // Restore after delay
+    let restore_state = state.inner().clone();
+    let restore_window = window.clone();
+    let restore_pattern = pattern.clone();
 
-                    frame[i] = r;
-                    frame[i + 1] = g;
-                    frame[i + 2] = b;
-                }
-            }
-        }
-    }
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(duration));
+        *restore_state.led_frame.lock() = original_frame;
 
-    frame
+        let _ = restore_window.emit("led_test_completed", json!({
+            "pattern": restore_pattern
+        }));
+    });
+
+    Ok(json!({
+        "status": "started",
+        "pattern": pattern,
+        "duration_ms": duration
+    }))
 }
 
 #[tauri::command]
-pub async fn get_led_controllers() -> Result<Vec<String>, String> {
-    Ok(vec![
-        "192.168.1.45:6454".to_string(),
-        "192.168.1.46:6454".to_string(),
-        "192.168.1.47:6454".to_string(),
-        "192.168.1.48:6454".to_string(),
-    ])
-}
-
-#[tauri::command]
-pub async fn get_led_stats(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let is_running = *state.led_running.lock();
+pub async fn led_get_status(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let running = *state.led_running.lock();
     let brightness = *state.led_brightness.lock();
+    let mode = state.led_mode.lock().clone();
     let frame_size = state.led_frame.lock().len();
 
     Ok(json!({
-        "is_running": is_running,
+        "running": running,
+        "mode": mode,
         "brightness": brightness,
         "frame_size": frame_size,
-        "matrix_size": "128x128",
-        "controllers": 4,
-        "mode": if is_running { "active" } else { "stopped" }
+        "matrix_size": format!("{}x{}", crate::led::MATRIX_WIDTH, crate::led::MATRIX_HEIGHT),
+        "target_fps": crate::led::TARGET_FPS,
+        "frame_time_ms": crate::led::FRAME_TIME_MS
+    }))
+}
+
+#[tauri::command]
+pub async fn led_test_connectivity(
+    window: Window,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🔍 [LED] Testing connectivity...");
+
+    let mode_str = state.led_mode.lock().clone();
+    let led_mode = match mode_str.as_str() {
+        "production" => crate::led::LedMode::Production,
+        _ => crate::led::LedMode::Simulator,
+    };
+
+    let _ = window.emit("led_connectivity_test_started", json!({ "mode": mode_str }));
+
+    match crate::led::LedController::new_with_mode(led_mode) {
+        Ok(mut controller) => {
+            match controller.test_connectivity() {
+                Ok(results) => {
+                    let successful = results.values().filter(|&&v| v).count();
+
+                    let _ = window.emit("led_connectivity_test_completed", json!({
+                        "results": results,
+                        "success": true
+                    }));
+
+                    Ok(json!({
+                        "status": "success",
+                        "results": results,
+                        "total_controllers": results.len(),
+                        "active_controllers": successful
+                    }))
+                }
+                Err(e) => {
+                    let _ = window.emit("led_connectivity_test_failed", json!({ "error": e }));
+                    Err(format!("Connectivity test failed: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            let _ = window.emit("led_connectivity_test_failed", json!({ "error": e }));
+            Err(format!("Failed to create controller: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn led_get_controllers(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mode = state.led_mode.lock().clone();
+
+    let controllers = if mode == "production" {
+        vec![
+            json!({"id": "controller_1", "ip": "192.168.1.45", "enabled": true}),
+            json!({"id": "controller_2", "ip": "192.168.1.46", "enabled": true}),
+            json!({"id": "controller_3", "ip": "192.168.1.47", "enabled": true}),
+            json!({"id": "controller_4", "ip": "192.168.1.48", "enabled": true}),
+        ]
+    } else {
+        vec![
+            json!({"id": "simulator", "ip": "127.0.0.1", "enabled": true}),
+        ]
+    };
+
+    Ok(json!({
+        "mode": mode,
+        "controllers": controllers,
+        "total": controllers.len()
+    }))
+}
+
+#[tauri::command]
+pub async fn led_get_test_patterns() -> Result<serde_json::Value, String> {
+    Ok(json!({
+        "basic": [
+            { "id": "red", "name": "Red", "description": "All LEDs red" },
+            { "id": "green", "name": "Green", "description": "All LEDs green" },
+            { "id": "blue", "name": "Blue", "description": "All LEDs blue" },
+            { "id": "white", "name": "White", "description": "All LEDs white" },
+            { "id": "off", "name": "Off", "description": "All LEDs off" }
+        ],
+        "patterns": [
+            { "id": "gradient", "name": "Gradient", "description": "Horizontal gradient" },
+            { "id": "checkerboard", "name": "Checkerboard", "description": "Checkerboard pattern" }
+        ]
+    }))
+}
+
+#[tauri::command]
+pub async fn led_clear_display(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🧹 [LED] Clearing display");
+
+    let black_frame = vec![0; crate::led::MATRIX_SIZE];
+    *state.led_frame.lock() = black_frame;
+
+    Ok(json!({
+        "status": "cleared",
+        "message": "Display cleared"
+    }))
+}
+
+#[tauri::command]
+pub async fn led_get_frame_data(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let frame = state.led_frame.lock().clone();
+    let avg_brightness = frame.iter().map(|&b| b as u32).sum::<u32>() as f32 / frame.len() as f32;
+
+    Ok(json!({
+        "width": crate::led::MATRIX_WIDTH,
+        "height": crate::led::MATRIX_HEIGHT,
+        "format": "RGB",
+        "data_size": frame.len(),
+        "average_brightness": avg_brightness,
+        "data": frame
     }))
 }

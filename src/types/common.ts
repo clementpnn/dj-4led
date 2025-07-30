@@ -1,7 +1,7 @@
-export interface ActionResult {
+export interface ActionResult<T = any> {
 	success: boolean;
 	message: string;
-	data?: any;
+	data?: T;
 	error?: string;
 }
 

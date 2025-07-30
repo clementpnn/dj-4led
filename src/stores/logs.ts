@@ -1,21 +1,20 @@
+// stores/logs.ts
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, readonly, ref } from 'vue';
 import { APP_CONFIG } from '../config';
 import type { LogEntry, LogFilter, LogStats } from '../types';
 
 export const useLogsStore = defineStore('logs', () => {
 	// ===== STATE =====
-
 	const logs = ref<LogEntry[]>([]);
 	const filter = ref<LogFilter>({
 		types: ['info', 'success', 'error', 'warning'],
 		categories: [],
 		searchText: '',
 	});
-	const maxLogs = ref(APP_CONFIG.performance.maxLogs);
+	const maxLogs = ref<number>(APP_CONFIG.performance.maxLogs);
 
 	// ===== GETTERS =====
-
 	const filteredLogs = computed(() => {
 		let filtered = logs.value;
 
@@ -97,7 +96,6 @@ export const useLogsStore = defineStore('logs', () => {
 	);
 
 	// ===== ACTIONS =====
-
 	const addLog = (
 		message: string,
 		type: LogEntry['type'] = 'info',
@@ -123,11 +121,11 @@ export const useLogsStore = defineStore('logs', () => {
 	};
 
 	const clearLogs = () => {
-		logs.value = [];
+		logs.value.splice(0, logs.value.length);
 	};
 
 	const setFilter = (newFilter: Partial<LogFilter>) => {
-		filter.value = { ...filter.value, ...newFilter };
+		Object.assign(filter.value, newFilter);
 	};
 
 	const setMaxLogs = (max: number) => {
@@ -159,19 +157,20 @@ export const useLogsStore = defineStore('logs', () => {
 	};
 
 	const reset = () => {
-		logs.value = [];
+		logs.value.splice(0, logs.value.length);
 		filter.value = {
 			types: ['info', 'success', 'error', 'warning'],
 			categories: [],
 			searchText: '',
 		};
+		maxLogs.value = APP_CONFIG.performance.maxLogs;
 	};
 
 	return {
 		// State
-		logs,
-		filter,
-		maxLogs,
+		logs: readonly(logs),
+		filter: readonly(filter),
+		maxLogs: readonly(maxLogs),
 
 		// Getters
 		filteredLogs,

@@ -1,81 +1,84 @@
 <template>
 	<div class="header">
 		<div class="header-left">
-			<h1>DJ-4LED</h1>
-			<div class="status">
-				<span :class="isConnected ? 'connected' : 'disconnected'">
-					{{ isConnected ? '● Connected' : '○ Disconnected' }}
-				</span>
-				<span v-if="isConnected && fps > 0" class="fps">{{ fps }} FPS</span>
+			<div class="brand">
+				<span class="logo">🎛️</span>
+				<h1>DJ4LED</h1>
+			</div>
+			<div class="status-info">
+				<div class="connection-status" :class="{ connected: isConnected }">
+					<div class="status-dot"></div>
+					<span class="status-text">{{ isConnected ? 'Connected' : 'Offline' }}</span>
+				</div>
+				<div v-if="isConnected && fps > 0" class="fps-counter">{{ fps }} FPS</div>
 			</div>
 		</div>
 
-		<!-- Quick Actions intégrées -->
 		<div class="header-actions">
+			<!-- Stream Toggle -->
+			<button
+				v-if="isConnected"
+				class="action-btn stream-btn"
+				:class="{ active: isStreaming, loading: streamLoading }"
+				:disabled="streamLoading"
+				@click="$emit('stream-toggle')"
+			>
+				<span class="btn-icon">{{ isStreaming ? '⏹️' : '▶️' }}</span>
+				<span class="btn-text">{{ isStreaming ? 'Stop Stream' : 'Start Stream' }}</span>
+			</button>
+
+			<!-- Quick Actions -->
 			<button class="action-btn primary" :disabled="loading" @click="handleConnect">
+				<span class="btn-icon">{{ isConnected ? '🔌' : '🔗' }}</span>
 				<span class="btn-text">{{ isConnected ? 'Disconnect' : 'Connect' }}</span>
 			</button>
 
 			<button class="action-btn secondary" :disabled="!isConnected || loading" @click="handlePing">
-				<span class="btn-text">Ping</span>
-				<span v-if="pingMs > 0" class="ping-value">({{ pingMs }}ms)</span>
-			</button>
-
-			<!-- Stream Controls -->
-			<button
-				v-if="isConnected"
-				class="action-btn stream-btn"
-				:class="{ active: isStreaming }"
-				:disabled="streamLoading"
-				@click="$emit('stream-toggle')"
-			>
-				<span class="btn-text">{{ isStreaming ? 'Stop' : 'Start' }}</span>
+				<span class="btn-icon">📡</span>
+				<span class="btn-text">Health Check</span>
+				<span v-if="pingMs > 0" class="ping-badge">{{ pingMs }}ms</span>
 			</button>
 
 			<!-- Health Indicator -->
-			<div v-if="isStreaming" class="health-indicator" :class="{ healthy: isStreamHealthy }">
+			<div v-if="isStreaming" class="health-status" :class="{ healthy: isStreamHealthy }">
 				<div class="health-dot"></div>
-				<span class="health-text">{{ isStreamHealthy ? 'Good' : 'Poor' }}</span>
+				<span class="health-label">{{ isStreamHealthy ? 'Healthy' : 'Issues' }}</span>
 			</div>
 		</div>
 	</div>
 </template>
 
-<script setup>
-	const props = defineProps({
-		isConnected: {
-			type: Boolean,
-			default: false,
-		},
-		fps: {
-			type: Number,
-			default: 0,
-		},
-		isStreaming: {
-			type: Boolean,
-			default: false,
-		},
-		streamLoading: {
-			type: Boolean,
-			default: false,
-		},
-		isStreamHealthy: {
-			type: Boolean,
-			default: true,
-		},
-		loading: {
-			type: Boolean,
-			default: false,
-		},
-		pingMs: {
-			type: Number,
-			default: 0,
-		},
+<script setup lang="ts">
+	interface Props {
+		isConnected: boolean;
+		fps: number;
+		isStreaming: boolean;
+		streamLoading: boolean;
+		isStreamHealthy: boolean;
+		loading: boolean;
+		pingMs: number;
+	}
+
+	interface Emits {
+		(e: 'connect'): void;
+		(e: 'disconnect'): void;
+		(e: 'ping'): void;
+		(e: 'stream-toggle'): void;
+	}
+
+	const props = withDefaults(defineProps<Props>(), {
+		isConnected: false,
+		fps: 0,
+		isStreaming: false,
+		streamLoading: false,
+		isStreamHealthy: true,
+		loading: false,
+		pingMs: 0,
 	});
 
-	const emit = defineEmits(['connect', 'disconnect', 'ping', 'stream-toggle']);
+	const emit = defineEmits<Emits>();
 
-	const handleConnect = () => {
+	const handleConnect = (): void => {
 		if (props.isConnected) {
 			emit('disconnect');
 		} else {
@@ -83,7 +86,7 @@
 		}
 	};
 
-	const handlePing = () => {
+	const handlePing = (): void => {
 		emit('ping');
 	};
 </script>
@@ -93,146 +96,168 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 1rem 2rem;
-		background: rgba(22, 27, 34, 0.95);
-		backdrop-filter: blur(10px);
-		border-bottom: 1px solid #333;
-		position: sticky;
-		top: 0;
-		z-index: 100;
-		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-		gap: 2rem;
+		padding: 1rem 1.5rem;
+		background: #0d1117;
+		border-bottom: 1px solid #21262d;
+		color: #c9d1d9;
+		width: 100%;
+		box-sizing: border-box;
 	}
 
+	/* Brand Section */
 	.header-left {
 		display: flex;
 		align-items: center;
 		gap: 2rem;
-		flex-shrink: 0;
 	}
 
-	.header h1 {
-		margin: 0;
-		font-size: 1.5rem;
-		font-weight: 700;
+	.brand {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		color: #fff;
+		gap: 0.75rem;
 	}
 
 	.logo {
-		font-size: 1.75rem;
-		filter: drop-shadow(0 0 8px rgba(88, 166, 255, 0.4));
+		font-size: 1.5rem;
 	}
 
-	.status {
+	.brand h1 {
+		margin: 0;
+		font-size: 1.25rem;
+		font-weight: 600;
+		color: #c9d1d9;
+		letter-spacing: -0.025em;
+	}
+
+	/* Status Info */
+	.status-info {
 		display: flex;
 		align-items: center;
 		gap: 1rem;
-		font-size: 0.875rem;
 	}
 
-	.connected {
-		color: #4ade80;
-		font-weight: 600;
-		text-shadow: 0 0 8px rgba(74, 222, 128, 0.3);
-	}
-
-	.disconnected {
-		color: #f87171;
-		font-weight: 600;
-		text-shadow: 0 0 8px rgba(248, 113, 113, 0.3);
-	}
-
-	.fps {
-		background: linear-gradient(45deg, #2563eb, #3b82f6);
-		color: white;
+	.connection-status {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 		padding: 0.375rem 0.75rem;
-		border-radius: 20px;
-		font-weight: 700;
+		background: #161b22;
+		border: 1px solid #21262d;
+		border-radius: 4px;
 		font-size: 0.75rem;
-		box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
-		border: 1px solid rgba(59, 130, 246, 0.3);
+		font-weight: 500;
 	}
 
+	.connection-status.connected {
+		border-color: #3fb950;
+		background: rgba(63, 185, 80, 0.05);
+	}
+
+	.connection-status.connected .status-text {
+		color: #3fb950;
+	}
+
+	.status-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: #f85149;
+	}
+
+	.connection-status.connected .status-dot {
+		background: #3fb950;
+		animation: pulse 2s infinite;
+	}
+
+	.status-text {
+		color: #f85149;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.025em;
+	}
+
+	.fps-counter {
+		padding: 0.375rem 0.75rem;
+		background: #161b22;
+		border: 1px solid #21262d;
+		border-radius: 4px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #79c0ff;
+		font-family: monospace;
+	}
+
+	/* Actions */
 	.header-actions {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
-		flex-wrap: wrap;
+		gap: 0.75rem;
 	}
 
 	.action-btn {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		padding: 0.75rem 1.25rem;
-		border: 1px solid #333;
-		border-radius: 25px;
+		padding: 0.75rem 1rem;
+		background: #161b22;
+		border: 1px solid #21262d;
+		border-radius: 4px;
+		color: #c9d1d9;
 		font-size: 0.875rem;
-		font-weight: 600;
+		font-weight: 500;
 		cursor: pointer;
-		transition: all 0.3s ease;
-		position: relative;
-		overflow: hidden;
+		transition: all 0.2s ease;
 		white-space: nowrap;
 	}
 
-	.action-btn.primary {
-		background: linear-gradient(135deg, #2d5016, #3d6a1f);
-		border-color: #4ade80;
-		color: white;
-		box-shadow: 0 0 15px rgba(74, 222, 128, 0.3);
-	}
-
-	.action-btn.primary:hover:not(:disabled) {
-		background: linear-gradient(135deg, #3d6a1f, #4d7a2f);
-		box-shadow: 0 4px 20px rgba(74, 222, 128, 0.4);
-		transform: translateY(-1px);
-	}
-
-	.action-btn.secondary {
-		background: linear-gradient(135deg, #1e3a8a, #2563eb);
-		border-color: #3b82f6;
-		color: white;
-		box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
-	}
-
-	.action-btn.secondary:hover:not(:disabled) {
-		background: linear-gradient(135deg, #2563eb, #3b82f6);
-		box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
-		transform: translateY(-1px);
-	}
-
-	.action-btn.stream-btn {
-		background: linear-gradient(135deg, #2a2a2a, #3a3a3a);
-		color: white;
-	}
-
-	.action-btn.stream-btn:hover:not(:disabled) {
-		background: linear-gradient(135deg, #3a3a3a, #4a4a4a);
-		transform: translateY(-1px);
-		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-		border-color: #555;
-	}
-
-	.action-btn.stream-btn.active {
-		background: linear-gradient(135deg, #dc2626, #ef4444);
-		border-color: #f87171;
-		box-shadow: 0 0 15px rgba(220, 38, 38, 0.4);
-	}
-
-	.action-btn.stream-btn.active:hover:not(:disabled) {
-		background: linear-gradient(135deg, #ef4444, #f87171);
-		box-shadow: 0 4px 20px rgba(220, 38, 38, 0.5);
+	.action-btn:hover:not(:disabled) {
+		background: #21262d;
+		border-color: #30363d;
 	}
 
 	.action-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
-		transform: none;
-		box-shadow: none;
+	}
+
+	.action-btn.primary {
+		border-color: #3fb950;
+		color: #3fb950;
+	}
+
+	.action-btn.primary:hover:not(:disabled) {
+		background: rgba(63, 185, 80, 0.1);
+		border-color: #46c557;
+	}
+
+	.action-btn.secondary {
+		border-color: #79c0ff;
+		color: #79c0ff;
+	}
+
+	.action-btn.secondary:hover:not(:disabled) {
+		background: rgba(121, 192, 255, 0.1);
+		border-color: #8cc8ff;
+	}
+
+	.action-btn.stream-btn {
+		border-color: #f85149;
+		color: #f85149;
+	}
+
+	.action-btn.stream-btn:hover:not(:disabled) {
+		background: rgba(248, 81, 73, 0.1);
+		border-color: #ff6b62;
+	}
+
+	.action-btn.stream-btn.active {
+		background: rgba(248, 81, 73, 0.1);
+		border-color: #f85149;
+	}
+
+	.action-btn.stream-btn.loading {
+		opacity: 0.7;
+		cursor: wait;
 	}
 
 	.btn-icon {
@@ -241,183 +266,136 @@
 	}
 
 	.btn-text {
-		font-weight: 700;
-		flex-shrink: 0;
-	}
-
-	.ping-value {
-		font-size: 0.75rem;
-		opacity: 0.9;
 		font-weight: 500;
 	}
 
-	.health-indicator {
+	.ping-badge {
+		padding: 0.125rem 0.375rem;
+		background: #21262d;
+		border-radius: 8px;
+		font-size: 0.625rem;
+		font-weight: 600;
+		font-family: monospace;
+	}
+
+	/* Health Status */
+	.health-status {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		padding: 0.5rem 1rem;
-		background: rgba(30, 30, 30, 0.8);
-		border: 1px solid #333;
-		border-radius: 20px;
+		padding: 0.375rem 0.75rem;
+		background: #161b22;
+		border: 1px solid #21262d;
+		border-radius: 4px;
 		font-size: 0.75rem;
-		font-weight: 600;
-		backdrop-filter: blur(4px);
+		font-weight: 500;
 	}
 
-	.health-indicator.healthy {
-		border-color: #4ade80;
-		background: rgba(74, 222, 128, 0.1);
+	.health-status.healthy {
+		border-color: #3fb950;
+		background: rgba(63, 185, 80, 0.05);
 	}
 
-	.health-indicator.healthy .health-text {
-		color: #4ade80;
-	}
-
-	.health-indicator.healthy .health-dot {
-		background: #4ade80;
-		box-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+	.health-status.healthy .health-label {
+		color: #3fb950;
 	}
 
 	.health-dot {
-		width: 8px;
-		height: 8px;
+		width: 6px;
+		height: 6px;
 		border-radius: 50%;
-		background: #f87171;
-		box-shadow: 0 0 8px rgba(248, 113, 113, 0.6);
-		animation: pulse 2s infinite;
+		background: #f85149;
 	}
 
-	.health-text {
-		color: #f87171;
-		font-weight: 700;
+	.health-status.healthy .health-dot {
+		background: #3fb950;
 	}
 
+	.health-label {
+		color: #f85149;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.025em;
+	}
+
+	/* Animations */
 	@keyframes pulse {
 		0%,
 		100% {
 			opacity: 1;
-			transform: scale(1);
 		}
 		50% {
-			opacity: 0.7;
-			transform: scale(1.1);
+			opacity: 0.5;
 		}
 	}
 
-	/* Animation pour les boutons */
-	.action-btn::before {
-		content: '';
-		position: absolute;
-		top: 0;
-		left: -100%;
-		width: 100%;
-		height: 100%;
-		background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-		transition: left 0.5s;
-	}
-
-	.action-btn:hover:not(:disabled)::before {
-		left: 100%;
-	}
-
-	@media (max-width: 1200px) {
-		.header {
-			padding: 1rem 1.5rem;
-			gap: 1.5rem;
-		}
-
-		.header-left {
-			gap: 1.5rem;
-		}
-
-		.header-actions {
-			gap: 0.75rem;
-		}
-
-		.action-btn {
-			padding: 0.625rem 1rem;
-			font-size: 0.8rem;
-		}
-	}
-
+	/* Responsive */
 	@media (max-width: 1024px) {
 		.header {
-			flex-direction: column;
-			gap: 1.5rem;
 			padding: 1rem;
-			align-items: stretch;
 		}
 
 		.header-left {
-			justify-content: space-between;
-			align-items: center;
-			gap: 1rem;
-		}
-
-		.header h1 {
-			font-size: 1.25rem;
+			gap: 1.5rem;
 		}
 
 		.header-actions {
-			justify-content: center;
-			flex-wrap: wrap;
-			gap: 1rem;
+			gap: 0.5rem;
 		}
 
 		.action-btn {
-			flex: 1;
-			justify-content: center;
-			min-width: 120px;
-			max-width: 200px;
+			padding: 0.625rem 0.875rem;
+			font-size: 0.8rem;
 		}
 	}
 
 	@media (max-width: 768px) {
-		.header-left {
+		.header {
 			flex-direction: column;
-			gap: 0.75rem;
-			align-items: center;
+			gap: 1rem;
+			padding: 1rem;
 		}
 
-		.status {
-			gap: 0.75rem;
-			font-size: 0.8rem;
+		.header-left {
+			width: 100%;
+			justify-content: space-between;
 		}
 
 		.header-actions {
-			flex-direction: column;
-			gap: 0.75rem;
+			width: 100%;
+			justify-content: center;
+			flex-wrap: wrap;
 		}
 
 		.action-btn {
-			width: 100%;
-			max-width: none;
-		}
-
-		.health-indicator {
-			align-self: center;
-			padding: 0.375rem 0.75rem;
+			flex: 1;
+			min-width: 120px;
+			justify-content: center;
 		}
 	}
 
 	@media (max-width: 480px) {
-		.header {
-			padding: 0.75rem;
+		.brand h1 {
+			font-size: 1.125rem;
+		}
+
+		.status-info {
+			flex-direction: column;
+			gap: 0.5rem;
+			align-items: flex-end;
 		}
 
 		.action-btn {
-			padding: 0.75rem 1rem;
+			padding: 0.75rem;
 			font-size: 0.875rem;
 		}
 
-		.ping-value {
+		.btn-text {
 			display: none;
 		}
-	}
 
-	/* Focus styles pour l'accessibilité */
-	.action-btn:focus {
-		outline: 2px solid #58a6ff;
-		outline-offset: 2px;
+		.health-status {
+			order: -1;
+		}
 	}
 </style>

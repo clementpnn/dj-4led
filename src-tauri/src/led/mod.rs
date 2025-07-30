@@ -1,84 +1,186 @@
 pub mod artnet;
 pub mod controller;
 
-pub use controller::{LedController, TestPattern};
+// Re-export pour compatibilité
+pub use controller::LedController;
 
 use serde::{Deserialize, Serialize};
 
-/// Mode de fonctionnement du contrôleur LED
+// Configuration LED Production
+pub const MATRIX_WIDTH: usize = 128;
+pub const MATRIX_HEIGHT: usize = 128;
+pub const MATRIX_SIZE: usize = MATRIX_WIDTH * MATRIX_HEIGHT * 3;
+pub const TARGET_FPS: f32 = 77.0;
+pub const FRAME_TIME_MS: u64 = 13; // ~77 FPS
+
+/// Mode de fonctionnement - Production avec fallback Simulator
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LedMode {
-    /// Mode simulateur (localhost)
-    Simulator,
-    /// Mode production (contrôleurs physiques)
-    Production,
+    Production, // Mode principal
+    Simulator,  // Mode fallback pour compatibilité
 }
 
 impl Default for LedMode {
     fn default() -> Self {
-        LedMode::Simulator
+        LedMode::Production // TOUJOURS PRODUCTION PAR DÉFAUT
     }
 }
 
-/// Configuration d'un contrôleur LED
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ControllerConfig {
-    pub ip_address: String,
-    pub start_universe: u16,
-    pub universe_count: u16,
-    pub name: String,
+/// Patterns de test pour production
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum TestPattern {
+    AllRed,
+    AllGreen,
+    AllBlue,
+    AllWhite,
+    Gradient,
+    Checkerboard,
+    QuarterTest,
 }
 
-/// Statistiques de performance LED
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct LedStats {
-    pub frames_sent: u64,
-    pub packets_sent: u64,
-    pub bytes_sent: u64,
-    pub fps: f32,
-    pub avg_frame_time_ms: f32,
-    pub controllers_active: usize,
-    pub universes_active: usize,
+impl TestPattern {
+    pub fn all() -> Vec<TestPattern> {
+        vec![
+            TestPattern::AllRed,
+            TestPattern::AllGreen,
+            TestPattern::AllBlue,
+            TestPattern::AllWhite,
+            TestPattern::Gradient,
+            TestPattern::Checkerboard,
+            TestPattern::QuarterTest,
+        ]
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            TestPattern::AllRed => "Rouge Production",
+            TestPattern::AllGreen => "Vert Production",
+            TestPattern::AllBlue => "Bleu Production",
+            TestPattern::AllWhite => "Blanc Production",
+            TestPattern::Gradient => "Dégradé Production",
+            TestPattern::Checkerboard => "Damier Production",
+            TestPattern::QuarterTest => "Test Quarts Production",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            TestPattern::AllRed => "Toutes les LEDs physiques en rouge",
+            TestPattern::AllGreen => "Toutes les LEDs physiques en vert",
+            TestPattern::AllBlue => "Toutes les LEDs physiques en bleu",
+            TestPattern::AllWhite => "Toutes les LEDs physiques en blanc",
+            TestPattern::Gradient => "Dégradé horizontal sur écran physique",
+            TestPattern::Checkerboard => "Pattern damier sur écran physique",
+            TestPattern::QuarterTest => "Test par contrôleur (4 quarts)",
+        }
+    }
 }
 
-/// Retourne la configuration des contrôleurs pour le mode production
-pub fn default_production_controllers() -> Vec<ControllerConfig> {
-    vec![
-        ControllerConfig {
-            ip_address: "192.168.1.45".to_string(),
-            start_universe: 0,
-            universe_count: 32,
-            name: "Controller 1".to_string(),
-        },
-        ControllerConfig {
-            ip_address: "192.168.1.46".to_string(),
-            start_universe: 32,
-            universe_count: 32,
-            name: "Controller 2".to_string(),
-        },
-        ControllerConfig {
-            ip_address: "192.168.1.47".to_string(),
-            start_universe: 64,
-            universe_count: 32,
-            name: "Controller 3".to_string(),
-        },
-        ControllerConfig {
-            ip_address: "192.168.1.48".to_string(),
-            start_universe: 96,
-            universe_count: 32,
-            name: "Controller 4".to_string(),
-        },
-    ]
+// Fonctions utilitaires production
+pub fn validate_frame_size(frame: &[u8]) -> Result<(), String> {
+    if frame.len() != MATRIX_SIZE {
+        return Err(format!("PRODUCTION: Taille frame invalide: {} (attendu {})",
+                          frame.len(), MATRIX_SIZE));
+    }
+    Ok(())
 }
 
-/// Retourne la configuration des contrôleurs pour le mode simulateur
-pub fn default_simulator_controllers() -> Vec<ControllerConfig> {
-    vec![
-        ControllerConfig {
-            ip_address: "127.0.0.1".to_string(),
-            start_universe: 0,
-            universe_count: 256, // Tous les univers sur localhost
-            name: "Simulator".to_string(),
-        },
-    ]
+pub fn validate_brightness(brightness: f32) -> Result<(), String> {
+    if !(0.0..=1.0).contains(&brightness) {
+        return Err("PRODUCTION: Brightness doit être entre 0.0 et 1.0".to_string());
+    }
+    Ok(())
+}
+
+pub fn create_test_pattern(pattern: &str, width: usize, height: usize) -> Vec<u8> {
+    let size = width * height * 3;
+    println!("🎨 [PATTERN] PRODUCTION Pattern '{}' - {}x{} = {} bytes",
+             pattern, width, height, size);
+
+    match pattern {
+        "red" => {
+            let mut frame = vec![0; size];
+            for i in (0..size).step_by(3) {
+                frame[i] = 255; // Rouge
+            }
+            println!("🎨 [PATTERN] PRODUCTION Rouge créé");
+            frame
+        }
+        "green" => {
+            let mut frame = vec![0; size];
+            for i in (1..size).step_by(3) {
+                frame[i] = 255; // Vert
+            }
+            println!("🎨 [PATTERN] PRODUCTION Vert créé");
+            frame
+        }
+        "blue" => {
+            let mut frame = vec![0; size];
+            for i in (2..size).step_by(3) {
+                frame[i] = 255; // Bleu
+            }
+            println!("🎨 [PATTERN] PRODUCTION Bleu créé");
+            frame
+        }
+        "white" => {
+            println!("🎨 [PATTERN] PRODUCTION Blanc créé");
+            vec![255; size]
+        }
+        "black" | "off" => {
+            println!("🎨 [PATTERN] PRODUCTION Noir/Off créé");
+            vec![0; size]
+        }
+        "gradient" => {
+            let mut frame = vec![0; size];
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = (y * width + x) * 3;
+                    let intensity = (x * 255 / width.max(1)) as u8;
+                    frame[idx] = intensity;           // Rouge
+                    frame[idx + 1] = intensity / 2;   // Vert
+                    frame[idx + 2] = 255 - intensity; // Bleu
+                }
+            }
+            println!("🎨 [PATTERN] PRODUCTION Gradient créé");
+            frame
+        }
+        "checkerboard" => {
+            let mut frame = vec![0; size];
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = (y * width + x) * 3;
+                    let is_white = (x / 8 + y / 8) % 2 == 0;
+                    let value = if is_white { 255 } else { 0 };
+                    frame[idx] = value;
+                    frame[idx + 1] = value;
+                    frame[idx + 2] = value;
+                }
+            }
+            println!("🎨 [PATTERN] PRODUCTION Damier créé");
+            frame
+        }
+        "quarter" => {
+            // Pattern spécial pour tester les 4 contrôleurs
+            let mut frame = vec![0; size];
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = (y * width + x) * 3;
+                    let quarter = (x / 32) % 4; // 4 quarts de 32 colonnes
+                    match quarter {
+                        0 => { frame[idx] = 255; frame[idx + 1] = 0; frame[idx + 2] = 0; }     // Rouge
+                        1 => { frame[idx] = 0; frame[idx + 1] = 255; frame[idx + 2] = 0; }     // Vert
+                        2 => { frame[idx] = 0; frame[idx + 1] = 0; frame[idx + 2] = 255; }     // Bleu
+                        3 => { frame[idx] = 255; frame[idx + 1] = 255; frame[idx + 2] = 255; } // Blanc
+                        _ => {}
+                    }
+                }
+            }
+            println!("🎨 [PATTERN] PRODUCTION Test Quarts créé");
+            frame
+        }
+        _ => {
+            println!("⚠️ [PATTERN] PRODUCTION Pattern '{}' inconnu, utilisation gradient", pattern);
+            create_test_pattern("gradient", width, height)
+        }
+    }
 }

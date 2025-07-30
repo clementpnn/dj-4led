@@ -1,5 +1,8 @@
+// src-tauri/src/lib.rs
+
 use parking_lot::Mutex;
 use std::sync::Arc;
+use tauri::Emitter;
 
 // Import modules
 pub mod audio;
@@ -7,7 +10,7 @@ pub mod commands;
 pub mod effects;
 pub mod led;
 
-// Application state shared across threads
+// Application state
 #[derive(Clone)]
 pub struct AppState {
     pub spectrum: Arc<Mutex<Vec<f32>>>,
@@ -17,6 +20,8 @@ pub struct AppState {
     pub led_running: Arc<Mutex<bool>>,
     pub audio_gain: Arc<Mutex<f32>>,
     pub led_brightness: Arc<Mutex<f32>>,
+    pub led_mode: Arc<Mutex<String>>,
+    pub last_error: Arc<Mutex<Option<String>>>,
 }
 
 impl AppState {
@@ -30,253 +35,202 @@ impl AppState {
             led_running: Arc::new(Mutex::new(false)),
             audio_gain: Arc::new(Mutex::new(1.0)),
             led_brightness: Arc::new(Mutex::new(1.0)),
+            led_mode: Arc::new(Mutex::new("production".to_string())), // FORCER PRODUCTION PAR DÉFAUT
+            last_error: Arc::new(Mutex::new(None)),
         })
+    }
+
+    pub fn set_error(&self, error: String) {
+        println!("❌ [STATE] Error set: {}", error);
+        *self.last_error.lock() = Some(error);
+    }
+
+    pub fn get_error(&self) -> Option<String> {
+        self.last_error.lock().clone()
     }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    println!("🚀 Starting LED Audio Visualizer...");
-    println!("✅ EffectEngine initialized with 8 effects");
+    println!("🚀 LED Audio Visualizer - Production Mode");
+    println!("🌐 Matrix: 128x128 = {} pixels total", 128 * 128);
 
     let app_state = AppState::new();
 
-    // 🔥 Démarrage automatique de l'audio en arrière-plan
-    let auto_audio_state = Arc::clone(&app_state);
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(1000)); // Attendre que Tauri soit prêt
-        println!("🎧 [AUTO] Tentative de démarrage automatique de l'audio...");
-        start_auto_audio(auto_audio_state);
-    });
+    // FORCER LE MODE PRODUCTION PAR DÉFAUT (mais permettre override)
+    std::env::set_var("LED_MODE", std::env::var("LED_MODE").unwrap_or("production".to_string()));
+    std::env::set_var("TAURI_LED_MODE", std::env::var("TAURI_LED_MODE").unwrap_or("production".to_string()));
 
-    // 🔥 Démarrage automatique des LEDs
+    let final_mode = std::env::var("LED_MODE").unwrap_or("production".to_string());
+    println!("🏭 [INIT] MODE LED: {}", final_mode);
+    println!("🏭 [INIT] - LED_MODE: {}", std::env::var("LED_MODE").unwrap_or("non défini".to_string()));
+    println!("🏭 [INIT] - TAURI_LED_MODE: {}", std::env::var("TAURI_LED_MODE").unwrap_or("non défini".to_string()));
+
+    // NOTE: Auto-start audio removed - manual start only
+    println!("🎧 [INIT] Audio system ready for manual start");
+
+    // Auto-start LED en mode PRODUCTION
     let auto_led_state = Arc::clone(&app_state);
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(1500)); // Attendre un peu plus
-        println!("🌐 [AUTO] Démarrage automatique du contrôleur LED...");
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        println!("💡 [AUTO] Starting LED in mode: {}", final_mode);
         start_auto_led(auto_led_state);
     });
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(app_state.as_ref().clone())
+        .manage((*app_state).clone())
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2000));
+                let _ = app_handle.emit("app_ready", serde_json::json!({
+                    "status": "ready",
+                    "message": "Application ready - PRODUCTION MODE"
+                }));
+            });
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Audio commands
-            commands::audio::get_audio_devices,
-            commands::audio::start_audio_capture,
-            commands::audio::stop_audio_capture,
-            commands::audio::get_current_spectrum,
-            commands::audio::set_audio_gain,
-            commands::audio::get_audio_gain,
+            commands::audio_start_capture,
+            commands::audio_stop_capture,
+            commands::audio_get_spectrum,
+            commands::audio_set_gain,
+            commands::audio_get_gain,
+            commands::audio_get_devices,
+            commands::audio_get_status,
+            commands::audio_test_input,
+
             // Effects commands
-            commands::effects::get_available_effects,
-            commands::effects::set_effect,
-            commands::effects::get_current_effect,
-            commands::effects::set_color_mode,
-            commands::effects::get_color_mode,
-            commands::effects::set_custom_color,
-            commands::effects::get_custom_color,
-            commands::effects::set_effect_parameter,
-            commands::effects::get_effect_parameter,
-            commands::effects::get_current_frame,
+            commands::effects_get_list,
+            commands::effects_set_current,
+            commands::effects_set_by_name,
+            commands::effects_get_current,
+            commands::effects_get_info,
+            commands::effects_set_color_mode,
+            commands::effects_get_color_mode,
+            commands::effects_set_custom_color,
+            commands::effects_get_custom_color,
+            commands::effects_reset_all,
+            commands::effects_get_stats,
+
             // LED commands
-            commands::led::start_led_output,
-            commands::led::stop_led_output,
-            commands::led::is_led_running,
-            commands::led::set_led_brightness,
-            commands::led::get_led_brightness,
-            commands::led::test_led_pattern,
-            commands::led::get_led_controllers,
-            commands::led::get_led_stats,
+            commands::led_start_output,
+            commands::led_stop_output,
+            commands::led_set_brightness,
+            commands::led_get_brightness,
+            commands::led_send_test_pattern,
+            commands::led_get_status,
+            commands::led_test_connectivity,
+            commands::led_get_controllers,
+            commands::led_get_test_patterns,
+            commands::led_clear_display,
+            commands::led_get_frame_data,
+
+            // System commands
+            commands::system_get_status,
+            commands::system_get_performance,
+            commands::system_restart_all,
+            commands::system_get_config,
+            commands::system_set_config,
+            commands::system_get_diagnostics,
+            commands::system_export_config,
+            commands::system_import_config,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running LED visualizer application");
+        .expect("Error running application");
 }
 
-// 🔥 Fonction pour démarrer l'audio automatiquement
-fn start_auto_audio(state: Arc<AppState>) {
-    // Vérifier si l'audio est déjà en cours
-    if *state.audio_running.lock() {
-        println!("🎧 [AUTO] Audio déjà en cours, abandon");
-        return;
-    }
-
-    println!("🔍 [AUTO] Scan des périphériques audio...");
-
-    // Debug des périphériques disponibles
-    if let Err(e) = audio::AudioCapture::list_devices() {
-        eprintln!("⚠️ [AUTO] Impossible de lister les périphériques: {}", e);
-    }
-
-    let audio_state = Arc::clone(&state);
-    let mut callback_count = 0u64;
-
-    println!("🔄 [AUTO] Tentative de création du stream audio...");
-
-    match audio::AudioCapture::new(move |data| {
-        callback_count += 1;
-
-        // Debug périodique pour confirmer la réception
-        if callback_count % 500 == 0 {
-            println!("🔊 [AUTO] AUDIO ACTIF: {} callbacks reçus, {} échantillons",
-                     callback_count, data.len());
-        }
-
-        // Analyse FFT
-        let spectrum = audio::compute_spectrum(data);
-        *audio_state.spectrum.lock() = spectrum.clone();
-
-        // Génération visuelle
-        let mut engine = audio_state.effect_engine.lock();
-        let frame = engine.render(&spectrum);
-        *audio_state.led_frame.lock() = frame;
-    }) {
-        Ok(_audio) => {
-            println!("✅ [AUTO] CAPTURE AUDIO AUTOMATIQUE DÉMARRÉE !");
-            *state.audio_running.lock() = true;
-
-            // Garder le stream audio vivant
-            loop {
-                if !*state.audio_running.lock() {
-                    println!("🎧 [AUTO] Arrêt demandé, fermeture audio");
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-        }
-        Err(e) => {
-            eprintln!("❌ [AUTO] ERREUR CAPTURE AUDIO: {}", e);
-            eprintln!("💡 [AUTO] Vérifiez que VB-Cable est installé et configuré");
-            eprintln!("🔄 [AUTO] BASCULEMENT EN MODE SIMULATION");
-
-            // Fallback en mode simulation
-            start_simulated_audio(state);
-        }
-    }
-}
-
-// 🔥 Fonction pour l'audio simulé
-fn start_simulated_audio(state: Arc<AppState>) {
-    println!("🎵 [AUTO-SIM] Démarrage audio simulé...");
-    *state.audio_running.lock() = true;
-
-    let mut time = 0.0f32;
-    let mut frame_count = 0u64;
-
-    while *state.audio_running.lock() {
-        // Simuler un spectre audio avec des ondes sinusoïdales
-        let mut spectrum = vec![0.0; 64];
-        for i in 0..64 {
-            spectrum[i] = ((time * (i as f32 + 1.0) * 0.1).sin() + 1.0)
-                * 0.5
-                * if i < 8 { 1.0 } else { 0.5 }; // Boost les basses
-        }
-        *state.spectrum.lock() = spectrum.clone();
-
-        // Génération visuelle
-        let mut engine = state.effect_engine.lock();
-        let frame = engine.render(&spectrum);
-        *state.led_frame.lock() = frame;
-
-        time += 0.05;
-        frame_count += 1;
-
-        // Log périodique pour confirmer que ça tourne
-        if frame_count % 250 == 0 { // Toutes les 5 secondes environ
-            println!("🎵 [AUTO-SIM] Audio simulé actif: {} frames générées", frame_count);
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(20)); // 50 FPS
-    }
-
-    println!("🎧 [AUTO-SIM] Thread audio simulé arrêté");
-}
-
-// 🔥 Fonction pour démarrer les LEDs automatiquement avec corrections
+// LED auto-start logic - Mode intelligent selon environnement
 fn start_auto_led(state: Arc<AppState>) {
     if *state.led_running.lock() {
-        println!("🌐 [AUTO] LED déjà en cours, abandon");
+        println!("💡 [AUTO] LED already running, skipping");
         return;
     }
 
-    println!("🌐 [AUTO] Initialisation contrôleur LED...");
+    println!("💡 [AUTO] Creating LED controller...");
 
-    // Détecter le mode LED depuis l'environnement
-    let led_mode = match std::env::var("TAURI_LED_MODE").as_deref() {
+    // Détection intelligente du mode
+    let mode = match std::env::var("LED_MODE").as_deref() {
         Ok("production") => {
-            println!("🔧 [AUTO] Mode PRODUCTION détecté");
+            println!("🏭 [AUTO] Mode PRODUCTION via LED_MODE");
+            *state.led_mode.lock() = "production".to_string();
             led::LedMode::Production
         }
-        _ => {
-            println!("🔧 [AUTO] Mode SIMULATEUR par défaut");
+        Ok("simulator") => {
+            println!("🧪 [AUTO] Mode SIMULATOR via LED_MODE");
+            *state.led_mode.lock() = "simulator".to_string();
             led::LedMode::Simulator
         }
+        _ => match std::env::var("TAURI_LED_MODE").as_deref() {
+            Ok("production") => {
+                println!("🏭 [AUTO] Mode PRODUCTION via TAURI_LED_MODE");
+                *state.led_mode.lock() = "production".to_string();
+                led::LedMode::Production
+            }
+            Ok("simulator") => {
+                println!("🧪 [AUTO] Mode SIMULATOR via TAURI_LED_MODE");
+                *state.led_mode.lock() = "simulator".to_string();
+                led::LedMode::Simulator
+            }
+            _ => {
+                println!("🏭 [AUTO] Mode PRODUCTION par défaut");
+                *state.led_mode.lock() = "production".to_string();
+                led::LedMode::Production
+            }
+        }
     };
 
-    let mut led = match led::LedController::new_with_mode(led_mode) {
-        Ok(mut controller) => {
-            println!("✅ [AUTO] Contrôleur LED initialisé");
-            // Test de connectivité initial
-            if let Err(e) = controller.test_connectivity() {
-                println!("⚠️ [AUTO] Test connectivité échoué: {}", e);
+    println!("💡 [AUTO] LED Mode Final: {:?}", mode);
+
+    // Create LED controller
+    match led::LedController::new_with_mode(mode) {
+        Ok(mut led_controller) => {
+            println!("✅ [AUTO] LED controller created successfully");
+            *state.led_running.lock() = true;
+
+            let mut frame_count = 0u64;
+            let start_time = std::time::Instant::now();
+
+            println!("💡 [AUTO] LED loop started in PRODUCTION MODE");
+
+            while *state.led_running.lock() {
+                let frame = state.led_frame.lock().clone();
+                let brightness = *state.led_brightness.lock();
+
+                // Apply brightness if needed
+                if brightness != 1.0 {
+                    let adjusted_frame: Vec<u8> = frame.iter()
+                        .map(|&byte| ((byte as f32) * brightness) as u8)
+                        .collect();
+                    led_controller.send_frame(&adjusted_frame);
+                } else {
+                    led_controller.send_frame(&frame);
+                }
+
+                frame_count += 1;
+
+                // Performance stats
+                if frame_count % 1000 == 0 {
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let fps = frame_count as f64 / elapsed;
+                    let avg_brightness = frame.iter().map(|&b| b as u32).sum::<u32>() as f32 / frame.len() as f32;
+                    println!("📊 [AUTO] LED {:?}: {:.1} FPS, Frame #{}, Avg brightness: {:.1}",
+                             mode, fps, frame_count, avg_brightness);
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(13)); // ~77 FPS
             }
-            controller
+
+            println!("💡 [AUTO] LED loop stopped");
+            let _ = led_controller.clear();
         }
         Err(e) => {
-            eprintln!("❌ [AUTO] Erreur initialisation LED: {}", e);
-            return;
+            println!("❌ [AUTO] LED controller creation failed: {}", e);
+            state.set_error(format!("LED {:?} failed: {}", mode, e));
         }
-    };
-
-    *state.led_running.lock() = true;
-    let mut frame_count = 0u64;
-    let start_time = std::time::Instant::now();
-    let mut consecutive_errors = 0;
-    let max_consecutive_errors = 10;
-
-    println!("🌐 [AUTO] Démarrage boucle LED...");
-
-    while *state.led_running.lock() {
-        let frame = state.led_frame.lock().clone();
-
-        // Meilleure gestion d'erreur avec reconnexion automatique
-        match led.send_frame(&frame) {
-            Ok(_) => {
-                consecutive_errors = 0; // Reset compteur d'erreurs
-            }
-            Err(e) => {
-                consecutive_errors += 1;
-                eprintln!("❌ [AUTO] Erreur envoi frame LED #{}: {}", consecutive_errors, e);
-
-                // Si trop d'erreurs consécutives, tenter une reconnexion
-                if consecutive_errors >= max_consecutive_errors {
-                    println!("🔄 [AUTO] Trop d'erreurs, tentative de reconnexion...");
-                    if let Err(reconnect_err) = led.restart_connections() {
-                        eprintln!("❌ [AUTO] Échec reconnexion: {}", reconnect_err);
-                        // Attendre plus longtemps avant de continuer
-                        std::thread::sleep(std::time::Duration::from_millis(1000));
-                    } else {
-                        println!("✅ [AUTO] Reconnexion réussie");
-                        consecutive_errors = 0;
-                    }
-                }
-            }
-        }
-
-        frame_count += 1;
-
-        // Statistiques plus détaillées
-        if frame_count % 100 == 0 {
-            let elapsed = start_time.elapsed().as_secs_f64();
-            let fps = frame_count as f64 / elapsed;
-            let stats = led.get_stats();
-            println!("📊 [AUTO] LED FPS: {:.1} | Frames: {} | Packets: {} | Errors: {}",
-                     fps, frame_count, stats.packets_sent, consecutive_errors);
-        }
-
-        // Framerate plus stable
-        std::thread::sleep(std::time::Duration::from_millis(13)); // ~77 FPS
     }
-
-    println!("🌐 [AUTO] Thread LED arrêté");
 }

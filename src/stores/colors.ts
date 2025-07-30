@@ -1,32 +1,31 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, readonly, ref } from 'vue';
 import { COLOR_MODES, DEFAULT_CUSTOM_COLOR } from '../config';
 import type { ColorConfig, ColorMode, CustomColor } from '../types';
 
 export const useColorsStore = defineStore('colors', () => {
 	// ===== STATE =====
-
 	const currentMode = ref<string>('rainbow');
 	const customColor = ref<CustomColor>({ ...DEFAULT_CUSTOM_COLOR });
 	const availableModes = ref<ColorMode[]>([...COLOR_MODES]);
 	const loading = ref(false);
 
 	// ===== GETTERS =====
-
 	const colorPreviewStyle = computed(() => {
-		const r = Math.round(customColor.value.r * 255);
-		const g = Math.round(customColor.value.g * 255);
-		const b = Math.round(customColor.value.b * 255);
+		const { r, g, b } = customColor.value;
+		const rgb = [r, g, b].map((v) => Math.round(v * 255));
 		return {
-			backgroundColor: `rgb(${r}, ${g}, ${b})`,
+			backgroundColor: `rgb(${rgb.join(', ')})`,
 		};
 	});
 
 	const hexColor = computed(() => {
-		const r = Math.round(customColor.value.r * 255);
-		const g = Math.round(customColor.value.g * 255);
-		const b = Math.round(customColor.value.b * 255);
-		return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`.toUpperCase();
+		const { r, g, b } = customColor.value;
+		const hex = [r, g, b]
+			.map((v) => Math.round(v * 255))
+			.map((v) => v.toString(16).padStart(2, '0'))
+			.join('');
+		return `#${hex}`.toUpperCase();
 	});
 
 	const currentModeInfo = computed(() => availableModes.value.find((mode) => mode.value === currentMode.value));
@@ -34,7 +33,6 @@ export const useColorsStore = defineStore('colors', () => {
 	const isCustomMode = computed(() => currentMode.value === 'custom');
 
 	// ===== ACTIONS =====
-
 	const setCurrentMode = (mode: string) => {
 		if (availableModes.value.some((m) => m.value === mode)) {
 			currentMode.value = mode;
@@ -82,10 +80,10 @@ export const useColorsStore = defineStore('colors', () => {
 
 	return {
 		// State
-		currentMode,
-		customColor,
-		availableModes,
-		loading,
+		currentMode: readonly(currentMode),
+		customColor: readonly(customColor),
+		availableModes: readonly(availableModes),
+		loading: readonly(loading),
 
 		// Getters
 		colorPreviewStyle,

@@ -3,8 +3,15 @@ export interface FrameData {
 	height: number;
 	format: string;
 	data_size: number;
-	data: number[];
+	data: readonly number[];
 	timestamp: number;
+	statistics?: {
+		average_brightness: number;
+		max_brightness: number;
+		active_pixels: number;
+		total_pixels: number;
+		activity_percentage: number;
+	};
 }
 
 export interface FrameStats {

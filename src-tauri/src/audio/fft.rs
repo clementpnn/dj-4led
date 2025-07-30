@@ -8,11 +8,11 @@ const NOISE_FLOOR: f32 = 0.001;
 const MIN_THRESHOLD: f32 = 0.05;
 
 pub fn compute_spectrum(audio: &[f32]) -> Vec<f32> {
-
+    // Initialiser le planificateur FFT
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(FFT_SIZE);
 
-    // Prepare input with windowing
+    // Préparer l'entrée avec fenêtrage de Hanning
     let mut input: Vec<Complex<f32>> = audio
         .iter()
         .take(FFT_SIZE)
@@ -20,16 +20,15 @@ pub fn compute_spectrum(audio: &[f32]) -> Vec<f32> {
         .map(|(&sample, window)| Complex::new(sample * window as f32, 0.0))
         .collect();
 
-    // Pad if necessary
+    // Compléter avec des zéros si nécessaire
     input.resize(FFT_SIZE, Complex::new(0.0, 0.0));
 
-    // Compute FFT
+    // Calculer la FFT
     fft.process(&mut input);
 
-    // Convert to magnitude spectrum with linear distribution
+    // Convertir en spectre de magnitude
     let mut spectrum = vec![0.0; SPECTRUM_SIZE];
     let useful_bins = FFT_SIZE / 4;
-
 
     for i in 0..SPECTRUM_SIZE {
         let start = (i * useful_bins) / SPECTRUM_SIZE;
@@ -53,8 +52,7 @@ pub fn compute_spectrum(audio: &[f32]) -> Vec<f32> {
         }
     }
 
-
-    // Appliquer une pondération perceptuelle
+    // Pondération perceptuelle
     for i in 0..SPECTRUM_SIZE {
         let freq_factor = if i < 8 {
             1.5 // Boost basses
@@ -101,7 +99,6 @@ pub fn compute_spectrum(audio: &[f32]) -> Vec<f32> {
             *val = (*val * norm_factor * 0.25).powf(0.7 + dynamic_factor * 0.3);
             *val = val.min(1.0);
         }
-
     } else {
         for val in &mut smoothed {
             *val = (*val * 5.0).min(0.05);
@@ -109,4 +106,23 @@ pub fn compute_spectrum(audio: &[f32]) -> Vec<f32> {
     }
 
     smoothed
+}
+
+// Analyse de la qualité du signal
+pub fn analyze_signal_quality(spectrum: &[f32]) -> (f32, f32, usize) {
+    let max_val = spectrum.iter().cloned().fold(0.0, f32::max);
+    let rms = (spectrum.iter().map(|&x| x * x).sum::<f32>() / spectrum.len() as f32).sqrt();
+    let active_bins = spectrum.iter().filter(|&&x| x > 0.01).count();
+
+    (max_val, rms, active_bins)
+}
+
+// Détection de signal musical
+pub fn detect_music_signal(spectrum: &[f32]) -> bool {
+    let (max_val, rms, active_bins) = analyze_signal_quality(spectrum);
+
+    rms > 0.02 &&
+    active_bins >= 5 &&
+    max_val > 0.05 &&
+    (rms / max_val) > 0.1
 }

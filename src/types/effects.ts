@@ -1,12 +1,10 @@
 export interface Effect {
 	id: number;
 	name: string;
-	display_name: string;
-	emoji: string;
-	description: string;
-	category?: 'spectrum' | 'particle' | 'rhythm' | 'ambient';
-	supports_transitions?: boolean;
-	performance_impact?: 'low' | 'medium' | 'high';
+	display_name?: string;
+	description?: string;
+	category?: string;
+	emoji?: string;
 }
 
 export interface EffectState {
@@ -14,6 +12,15 @@ export interface EffectState {
 	name: string;
 	transitioning: boolean;
 	transition_progress: number;
+}
+
+export interface EffectInfo {
+	id: number;
+	name: string;
+	description: string;
+	performance_impact: 'low' | 'medium' | 'high';
+	supports_transitions: boolean;
+	supports_custom_colors: boolean;
 }
 
 export interface EffectParameter {
@@ -25,14 +32,4 @@ export interface EffectParameter {
 	max?: number;
 	step?: number;
 	options?: string[];
-}
-
-export interface EffectInfo {
-	id: number;
-	name: string;
-	description: string;
-	supports_transitions: boolean;
-	supports_custom_colors: boolean;
-	performance_impact: string;
-	parameters?: EffectParameter[];
 }

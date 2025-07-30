@@ -7,21 +7,20 @@ export interface CustomColor {
 export interface ColorMode {
 	value: string;
 	label: string;
-	emoji: string;
+	emoji?: string;
 	description?: string;
 }
 
+export interface ColorConfig {
+	mode: string;
+	custom_color?: CustomColor;
+	available_modes?: string[];
+}
 export interface ColorChannel {
 	key: 'r' | 'g' | 'b';
 	name: string;
 	emoji: string;
 	color: string;
-}
-
-export interface ColorConfig {
-	mode: string;
-	custom_color: CustomColor;
-	available_modes: string[];
 }
 
 export interface ColorPalette {

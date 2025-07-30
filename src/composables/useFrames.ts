@@ -1,300 +1,443 @@
+// composables/useFrames.ts
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { computed, onMounted, onUnmounted } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useFramesStore } from '../stores/frames';
-import { useLogsStore } from '../stores/logs';
 import type { ActionResult, FrameData } from '../types';
 
 export function useFrames() {
+	// Store instance
 	const framesStore = useFramesStore();
-	const logsStore = useLogsStore();
 
+	// Local state for UI-specific functionality
+	const frameContainer = ref<HTMLElement | undefined>(undefined);
+	const autoRefresh = ref(true);
+	const error = ref<string | null>(null);
+
+	// Event listeners references
 	let unlistenFrameData: UnlistenFn | null = null;
-	let unlistenFrameCompressed: UnlistenFn | null = null;
+	let unlistenLedStats: UnlistenFn | null = null;
 
-	// Computed properties pour faciliter l'utilisation
+	// ===== COMPUTED PROPERTIES =====
+
 	const isReceivingFrames = computed(() => {
 		const now = Date.now();
-		const lastFrameTime = framesStore.stats.lastFrameTime;
-		return lastFrameTime > 0 && now - lastFrameTime < 5000; // 5 secondes de tolérance
+		const lastTime = framesStore.stats.lastFrameTime;
+		return lastTime > 0 && now - lastTime < 5000; // 5 seconds tolerance
 	});
 
-	const frameRate = computed(() => {
+	const currentFPS = computed(() => {
 		if (framesStore.frameHistory.length < 2) return 0;
 
-		const frames = framesStore.frameHistory.slice(-10); // Dernières 10 frames
-		if (frames.length < 2) return 0;
+		const recentFrames = framesStore.frameHistory.slice(-10);
+		if (recentFrames.length < 2) return 0;
 
-		const timeSpan = frames[frames.length - 1].timestamp - frames[0].timestamp;
-		return timeSpan > 0 ? Math.round((frames.length * 1000) / timeSpan) : 0;
+		const timeSpan = recentFrames[recentFrames.length - 1].timestamp - recentFrames[0].timestamp;
+		return timeSpan > 0 ? Math.round((recentFrames.length * 1000) / timeSpan) : 0;
 	});
 
-	// Récupérer la frame actuelle
+	const successRate = computed(() => {
+		const total = framesStore.stats.frameCount + framesStore.stats.droppedFrames;
+		return total > 0 ? ((framesStore.stats.frameCount - framesStore.stats.droppedFrames) / total) * 100 : 100;
+	});
+
+	const healthStatus = computed(() => {
+		if (!isReceivingFrames.value) return 'critical';
+		if (successRate.value < 90 || currentFPS.value < 15) return 'warning';
+		return 'healthy';
+	});
+
+	// ===== FRAME RETRIEVAL ACTIONS =====
+
 	const getCurrentFrame = async (): Promise<ActionResult> => {
 		framesStore.setLoading(true);
+		error.value = null;
+
 		try {
-			const frame = await invoke<FrameData>('get_current_frame');
-			framesStore.setCurrentFrame(frame);
-			logsStore.addLog(
-				`🖼️ Frame retrieved: ${frame.width}x${frame.height} (${(frame.data_size / 1024).toFixed(1)}KB)`,
-				'info',
-				'led',
-				{ width: frame.width, height: frame.height, size: frame.data_size }
+			const result = await invoke<any>('led_get_frame_data');
+
+			// Transform backend data to FrameData format
+			const frameData: FrameData = {
+				width: result.width,
+				height: result.height,
+				format: result.format || 'RGB',
+				data_size: result.data_size,
+				data: Array.from(result.data) as readonly number[],
+				timestamp: Date.now(),
+				statistics: {
+					average_brightness: result.average_brightness || 0,
+					max_brightness: Math.max(...result.data),
+					active_pixels: result.data.filter((pixel: number) => pixel > 0).length,
+					total_pixels: result.data.length,
+					activity_percentage:
+						(result.data.filter((pixel: number) => pixel > 0).length / result.data.length) * 100,
+				},
+			};
+
+			framesStore.setCurrentFrame(frameData);
+
+			console.log(
+				`🖼️ Frame retrieved: ${frameData.width}x${frameData.height} (${(frameData.data_size / 1024).toFixed(1)}KB)`
 			);
-			return { success: true, message: 'Frame retrieved', data: frame };
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			logsStore.addLog(`Failed to get current frame: ${errorMessage}`, 'error', 'led');
-			return { success: false, message: `❌ Frame error: ${errorMessage}` };
+
+			return {
+				success: true,
+				message: 'Frame retrieved successfully',
+				data: frameData,
+			};
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			error.value = errorMessage;
+			console.error('❌ Failed to get current frame:', errorMessage);
+			return { success: false, message: errorMessage };
 		} finally {
 			framesStore.setLoading(false);
 		}
 	};
 
-	// Gestionnaire des données de frame
-	const handleFrameData = (frame: FrameData): void => {
-		// Valider les données de frame
-		if (!frame || !frame.data || frame.width <= 0 || frame.height <= 0) {
-			logsStore.addLog('Invalid frame data received', 'warning', 'led');
-			framesStore.incrementDroppedFrames();
-			return;
-		}
-
-		// Enrichir la frame avec timestamp si manquant
-		if (!frame.timestamp) {
-			frame.timestamp = Date.now();
-		}
-
-		framesStore.setCurrentFrame(frame);
-
-		// Log périodique (chaque 100ème frame)
-		if (framesStore.stats.frameCount % 100 === 0) {
-			logsStore.addLog(
-				`📊 Frame #${framesStore.stats.frameCount}: ${frame.width}x${frame.height} @${frameRate.value}fps`,
-				'debug',
-				'led',
-				{ frameCount: framesStore.stats.frameCount, fps: frameRate.value }
-			);
-		}
+	const refreshFrame = async (): Promise<ActionResult> => {
+		console.log('🔄 Manual frame refresh requested');
+		return await getCurrentFrame();
 	};
 
-	// Gestionnaire des frames compressées
-	const handleCompressedFrameData = (compressedData: number[]): void => {
-		if (!compressedData || compressedData.length === 0) {
-			logsStore.addLog('Invalid compressed frame data received', 'warning', 'led');
-			framesStore.incrementDroppedFrames();
-			return;
-		}
+	// ===== FRAME PROCESSING UTILITIES =====
 
-		// Créer une frame virtuelle pour les données compressées
-		const frame: FrameData = {
-			width: 128, // Taille par défaut, pourrait être dynamique
-			height: 128,
-			format: 'compressed',
-			data_size: compressedData.length,
-			data: compressedData,
-			timestamp: Date.now(),
-		};
-
-		framesStore.setCurrentFrame(frame);
-		logsStore.addLog(`🗜️ Compressed frame received: ${compressedData.length} bytes`, 'debug', 'led');
-	};
-
-	// Configuration des écouteurs d'événements
-	const setupEventListeners = async (): Promise<void> => {
-		try {
-			// Écouter les frames normales
-			unlistenFrameData = await listen<FrameData>('frame_data', (event) => {
-				try {
-					handleFrameData(event.payload);
-				} catch (error) {
-					logsStore.addLog(`Error processing frame data: ${error}`, 'error', 'led');
-					framesStore.incrementDroppedFrames();
-				}
-			});
-
-			// Écouter les frames compressées
-			unlistenFrameCompressed = await listen<number[]>('frame_data_compressed', (event) => {
-				try {
-					handleCompressedFrameData(event.payload);
-				} catch (error) {
-					logsStore.addLog(`Error processing compressed frame: ${error}`, 'error', 'led');
-					framesStore.incrementDroppedFrames();
-				}
-			});
-
-			logsStore.addLog('✅ Frame event listeners ready', 'success', 'led');
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			logsStore.addLog(`❌ Error setting up frame event listeners: ${errorMessage}`, 'error', 'led');
-		}
-	};
-
-	// Nettoyage des écouteurs
-	const cleanup = (): void => {
-		const listeners = [
-			{ ref: unlistenFrameData, name: 'frame_data' },
-			{ ref: unlistenFrameCompressed, name: 'frame_data_compressed' },
-		];
-
-		listeners.forEach(({ ref, name }) => {
-			if (ref) {
-				try {
-					ref();
-					logsStore.addLog(`✅ Cleaned up ${name} listener`, 'debug', 'led');
-				} catch (error) {
-					logsStore.addLog(`❌ Error cleaning up ${name} listener: ${error}`, 'warning', 'led');
-				}
-			}
-		});
-
-		unlistenFrameData = null;
-		unlistenFrameCompressed = null;
-	};
-
-	// Convertir les données de frame en URL d'image (pour affichage)
-	const frameToImageUrl = (frame: FrameData): string => {
-		if (!frame || !frame.data || frame.data.length === 0) {
+	const frameToImageUrl = (frame?: FrameData): string => {
+		const targetFrame = frame || framesStore.currentFrame;
+		if (!targetFrame || !targetFrame.data || targetFrame.data.length === 0) {
 			return '';
 		}
 
 		try {
 			const canvas = document.createElement('canvas');
-			canvas.width = frame.width;
-			canvas.height = frame.height;
+			canvas.width = targetFrame.width;
+			canvas.height = targetFrame.height;
 			const ctx = canvas.getContext('2d');
 
 			if (!ctx) {
-				logsStore.addLog('Failed to get canvas context for frame conversion', 'warning', 'led');
+				console.warn('⚠️ Failed to get canvas context for frame conversion');
 				return '';
 			}
 
-			const imageData = ctx.createImageData(frame.width, frame.height);
+			const imageData = ctx.createImageData(targetFrame.width, targetFrame.height);
 			const data = imageData.data;
 
-			// Gestion des différents formats
-			if (frame.format === 'RGB' || !frame.format) {
-				// Convertir RGB en RGBA
-				for (let i = 0; i < frame.data.length; i += 3) {
+			// Convert readonly array to regular array for processing
+			const frameDataArray = Array.from(targetFrame.data);
+
+			// Convert RGB to RGBA
+			if (targetFrame.format === 'RGB' || !targetFrame.format) {
+				for (let i = 0; i < frameDataArray.length; i += 3) {
 					const pixelIndex = (i / 3) * 4;
 					if (pixelIndex + 3 < data.length) {
-						data[pixelIndex] = frame.data[i]; // R
-						data[pixelIndex + 1] = frame.data[i + 1]; // G
-						data[pixelIndex + 2] = frame.data[i + 2]; // B
+						data[pixelIndex] = frameDataArray[i]; // R
+						data[pixelIndex + 1] = frameDataArray[i + 1]; // G
+						data[pixelIndex + 2] = frameDataArray[i + 2]; // B
 						data[pixelIndex + 3] = 255; // A
 					}
 				}
-			} else if (frame.format === 'RGBA') {
-				// Copier directement les données RGBA
-				for (let i = 0; i < Math.min(frame.data.length, data.length); i++) {
-					data[i] = frame.data[i];
+			} else if (targetFrame.format === 'RGBA') {
+				for (let i = 0; i < Math.min(frameDataArray.length, data.length); i++) {
+					data[i] = frameDataArray[i];
 				}
 			}
 
 			ctx.putImageData(imageData, 0, 0);
 			return canvas.toDataURL('image/png');
-		} catch (error) {
-			logsStore.addLog(`Error converting frame to image: ${error}`, 'warning', 'led');
+		} catch (err) {
+			console.warn('⚠️ Error converting frame to image:', err);
 			return '';
 		}
 	};
 
-	// Convertir une frame en blob pour téléchargement
-	const frameToBlob = async (frame: FrameData): Promise<Blob | null> => {
+	const frameToBlob = async (frame?: FrameData): Promise<Blob | null> => {
 		try {
 			const dataUrl = frameToImageUrl(frame);
 			if (!dataUrl) return null;
 
 			const response = await fetch(dataUrl);
 			return await response.blob();
-		} catch (error) {
-			logsStore.addLog(`Error converting frame to blob: ${error}`, 'warning', 'led');
+		} catch (err) {
+			console.warn('⚠️ Error converting frame to blob:', err);
 			return null;
 		}
 	};
 
-	// Analyser les métriques de performance des frames
+	const downloadFrame = async (frame?: FrameData, filename?: string): Promise<ActionResult> => {
+		const targetFrame = frame || framesStore.currentFrame;
+		if (!targetFrame) {
+			return { success: false, message: 'No frame available to download' };
+		}
+
+		try {
+			const blob = await frameToBlob(targetFrame);
+			if (!blob) {
+				return { success: false, message: 'Failed to convert frame to downloadable format' };
+			}
+
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename || `frame-${targetFrame.timestamp || Date.now()}.png`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+
+			console.log('📥 Frame downloaded successfully');
+			return { success: true, message: 'Frame downloaded successfully' };
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			console.error('❌ Failed to download frame:', errorMessage);
+			return { success: false, message: errorMessage };
+		}
+	};
+
+	// ===== EXPORT & ANALYSIS =====
+
+	const exportFrameHistory = (): ActionResult => {
+		try {
+			if (framesStore.frameHistory.length === 0) {
+				return { success: false, message: 'No frame history to export' };
+			}
+
+			const exportData = {
+				timestamp: Date.now(),
+				frameCount: framesStore.frameHistory.length,
+				stats: framesStore.stats,
+				metrics: framesStore.metrics,
+				frames: framesStore.frameHistory.map((frame) => ({
+					timestamp: frame.timestamp,
+					width: frame.width,
+					height: frame.height,
+					format: frame.format,
+					data_size: frame.data_size,
+					statistics: frame.statistics,
+				})),
+			};
+
+			const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+				type: 'application/json',
+			});
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `frame-history-${new Date().toISOString().split('T')[0]}.json`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+
+			console.log('📤 Frame history exported successfully');
+			return { success: true, message: 'Frame history exported successfully' };
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			console.error('❌ Failed to export frame history:', errorMessage);
+			return { success: false, message: errorMessage };
+		}
+	};
+
 	const analyzePerformance = (): ActionResult => {
 		try {
-			const metrics = framesStore.metrics;
 			const analysis = {
-				status: 'good' as 'good' | 'warning' | 'critical',
+				status: 'healthy' as 'healthy' | 'warning' | 'critical',
+				score: 100,
 				issues: [] as string[],
 				recommendations: [] as string[],
+				metrics: framesStore.metrics,
 			};
 
-			// Analyser le taux de réussite
-			if (metrics.successRate < 90) {
+			// Analyze success rate
+			if (successRate.value < 80) {
 				analysis.status = 'critical';
-				analysis.issues.push(`Low success rate: ${metrics.successRate.toFixed(1)}%`);
+				analysis.score -= 40;
+				analysis.issues.push(`Very low success rate: ${successRate.value.toFixed(1)}%`);
 				analysis.recommendations.push('Check network connection and LED controllers');
-			} else if (metrics.successRate < 95) {
+			} else if (successRate.value < 95) {
 				analysis.status = 'warning';
-				analysis.issues.push(`Moderate frame drops: ${metrics.successRate.toFixed(1)}%`);
+				analysis.score -= 20;
+				analysis.issues.push(`Low success rate: ${successRate.value.toFixed(1)}%`);
+				analysis.recommendations.push('Monitor network stability');
 			}
 
-			// Analyser le FPS
-			if (metrics.averageFPS < 15) {
+			// Analyze FPS
+			if (currentFPS.value < 10) {
 				analysis.status = 'critical';
-				analysis.issues.push(`Low FPS: ${metrics.averageFPS.toFixed(1)}`);
-				analysis.recommendations.push('Reduce effect complexity or increase LED refresh rate');
-			} else if (metrics.averageFPS < 30) {
+				analysis.score -= 30;
+				analysis.issues.push(`Very low FPS: ${currentFPS.value}`);
+				analysis.recommendations.push('Reduce effect complexity or increase refresh rate');
+			} else if (currentFPS.value < 30) {
 				if (analysis.status !== 'critical') analysis.status = 'warning';
-				analysis.issues.push(`Moderate FPS: ${metrics.averageFPS.toFixed(1)}`);
+				analysis.score -= 15;
+				analysis.issues.push(`Low FPS: ${currentFPS.value}`);
+				analysis.recommendations.push('Consider optimizing effects');
 			}
 
-			logsStore.addLog(
-				`📊 Performance analysis: ${analysis.status} (${analysis.issues.length} issues)`,
-				analysis.status === 'good' ? 'success' : analysis.status === 'warning' ? 'warning' : 'error',
-				'led',
-				analysis
-			);
+			// Check frame reception
+			if (!isReceivingFrames.value) {
+				analysis.status = 'critical';
+				analysis.score -= 50;
+				analysis.issues.push('No frames received recently');
+				analysis.recommendations.push('Check LED output and audio capture status');
+			}
 
+			// Check frame quality
+			const currentFrame = framesStore.currentFrame;
+			if (currentFrame?.statistics && currentFrame.statistics.average_brightness < 1.0) {
+				analysis.score -= 10;
+				analysis.issues.push('Very low frame brightness detected');
+				analysis.recommendations.push('Check LED brightness settings');
+			}
+
+			console.log(`📊 Performance analysis: ${analysis.status} (score: ${analysis.score}/100)`);
 			return {
 				success: true,
-				message: `Performance analysis completed: ${analysis.status}`,
+				message: `Performance analysis: ${analysis.status} (${analysis.issues.length} issues)`,
 				data: analysis,
 			};
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
 			return { success: false, message: `Performance analysis failed: ${errorMessage}` };
 		}
 	};
 
-	// Lifecycle
+	// ===== AUTO-REFRESH FUNCTIONALITY =====
+
+	const handleAutoRefresh = (): void => {
+		if (frameContainer.value && autoRefresh.value) {
+			nextTick(() => {
+				// Trigger any frame display updates here
+				// Could be used to update canvas or image displays
+			});
+		}
+	};
+
+	const toggleAutoRefresh = (): void => {
+		autoRefresh.value = !autoRefresh.value;
+		if (autoRefresh.value) {
+			handleAutoRefresh();
+		}
+		console.log(`🔄 Auto-refresh ${autoRefresh.value ? 'enabled' : 'disabled'}`);
+	};
+
+	// ===== EVENT HANDLERS =====
+
+	const handleFrameUpdate = (event: any) => {
+		try {
+			// Use LED stats as proxy for frame updates since we don't have direct frame events
+			if (event.payload && event.payload.frame_count) {
+				// Update FPS in store
+				framesStore.updateStats({
+					fps: event.payload.fps || framesStore.stats.fps,
+				});
+
+				// Optionally refresh frame data
+				if (autoRefresh.value && event.payload.frame_count % 30 === 0) {
+					getCurrentFrame();
+				}
+			}
+		} catch (err) {
+			console.error('❌ Error processing frame update:', err);
+			framesStore.incrementDroppedFrames();
+		}
+	};
+
+	// ===== EVENT LISTENERS SETUP =====
+
+	const setupListeners = async (): Promise<void> => {
+		try {
+			// Listen for LED stats as proxy for frame updates
+			unlistenLedStats = await listen('led_stats', handleFrameUpdate);
+
+			console.log('✅ Frame event listeners setup complete');
+		} catch (err) {
+			console.error('❌ Failed to setup frame event listeners:', err);
+			error.value = 'Failed to setup event listeners';
+		}
+	};
+
+	const cleanup = (): void => {
+		const listeners = [
+			{ fn: unlistenFrameData, name: 'frame_data' },
+			{ fn: unlistenLedStats, name: 'led_stats' },
+		];
+
+		listeners.forEach(({ fn, name }) => {
+			if (fn) {
+				try {
+					fn();
+					console.log(`✅ Cleaned up ${name} listener`);
+				} catch (err) {
+					console.warn(`❌ Error cleaning up ${name} listener:`, err);
+				}
+			}
+		});
+
+		unlistenFrameData = null;
+		unlistenLedStats = null;
+	};
+
+	// ===== INITIALIZATION =====
+
+	const initialize = async (): Promise<void> => {
+		console.log('🖼️ Initializing frames composable...');
+
+		try {
+			await setupListeners();
+
+			// Get initial frame if auto-refresh is enabled
+			if (autoRefresh.value) {
+				await getCurrentFrame();
+			}
+
+			console.log('✅ Frames composable initialized successfully');
+		} catch (err) {
+			console.error('❌ Failed to initialize frames composable:', err);
+			error.value = 'Failed to initialize frames system';
+		}
+	};
+
+	// ===== LIFECYCLE =====
+
 	onMounted(() => {
-		logsStore.addLog('🖼️ Frames composable mounted', 'debug', 'led');
-		setupEventListeners();
+		console.log('🖼️ Frames composable mounted');
+		initialize();
 	});
 
 	onUnmounted(() => {
-		logsStore.addLog('💀 Frames composable unmounting', 'debug', 'led');
+		console.log('💀 Frames composable unmounting');
 		cleanup();
 	});
 
-	return {
-		// Store state access
-		currentFrame: framesStore.currentFrame,
-		frameHistory: framesStore.frameHistory,
-		stats: framesStore.stats,
-		loading: framesStore.loading,
-		hasCurrentFrame: framesStore.hasCurrentFrame,
-		frameCount: framesStore.frameCount,
-		averageFPS: framesStore.averageFPS,
-		metrics: framesStore.metrics,
-		recentFrames: framesStore.recentFrames,
+	// ===== PUBLIC API =====
 
-		// Computed properties
+	return {
+		// Store access
+		...framesStore,
+
+		// Local state
+		frameContainer,
+		autoRefresh,
+		error,
+
+		// Computed
 		isReceivingFrames,
-		frameRate,
+		currentFPS,
+		successRate,
+		healthStatus,
 
 		// Actions
 		getCurrentFrame,
+		refreshFrame,
 		frameToImageUrl,
 		frameToBlob,
+		downloadFrame,
+		exportFrameHistory,
 		analyzePerformance,
-		clearHistory: framesStore.clearHistory,
+		toggleAutoRefresh,
+
+		// Utilities
+		initialize,
 		cleanup,
-		reset: framesStore.reset,
 	};
 }

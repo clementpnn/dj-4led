@@ -1,83 +1,71 @@
 <template>
 	<div class="terminal">
 		<div class="terminal-header">
-			<div class="terminal-controls">
-				<div class="terminal-dot red"></div>
-				<div class="terminal-dot yellow"></div>
-				<div class="terminal-dot green"></div>
+			<div class="header-left">
+				<div class="terminal-controls">
+					<div class="terminal-dot red"></div>
+					<div class="terminal-dot yellow"></div>
+					<div class="terminal-dot green"></div>
+				</div>
 			</div>
-			<div class="terminal-title">Console</div>
 			<div class="terminal-actions">
-				<button
-					class="terminal-btn"
-					:class="{ active: autoScroll }"
-					@click="$emit('toggle-auto-scroll')"
-					title="Auto-scroll"
-				>
-					↓
+				<button class="terminal-btn export" @click="handleExportLogs" title="Export logs">
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+						<polyline points="7,10 12,15 17,10" />
+						<line x1="12" y1="15" x2="12" y2="3" />
+					</svg>
 				</button>
-				<button class="terminal-btn" @click="$emit('export-logs')" title="Export logs">⇩</button>
-				<button class="terminal-btn clear" @click="$emit('clear-logs')" title="Clear logs">×</button>
+				<button class="terminal-btn clear" @click="handleClearLogs" title="Clear all logs">
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path
+							d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"
+						/>
+					</svg>
+				</button>
 			</div>
 		</div>
 
-		<div ref="logContainer" class="terminal-body">
-			<div v-for="(log, index) in displayedLogs" :key="log.id || index" :class="['terminal-line', log.type]">
-				<span class="terminal-prompt">$</span>
-				<span class="terminal-time">{{ log.time }}</span>
-				<span v-if="log.category" class="terminal-category">[{{ log.category.toUpperCase() }}]</span>
-				<span class="terminal-message">{{ log.message }}</span>
+		<div ref="logs.logContainer" class="terminal-body">
+			<div v-if="logs.logs.length === 0" class="no-logs">
+				<div class="no-logs-icon">📝</div>
+				<div class="no-logs-text">No logs yet</div>
+				<div class="no-logs-hint">System events will appear here</div>
 			</div>
 
-			<div v-if="displayedLogs.length === 0" class="no-logs">
-				<div class="no-logs-text">No logs available</div>
-			</div>
-
-			<div v-if="displayedLogs.length > 0" class="terminal-cursor">_</div>
-		</div>
-
-		<div class="terminal-footer">
-			<div class="footer-stats">
-				<span class="stat-item">Total: {{ logs.length }}</span>
-				<span class="stat-item">Errors: {{ errorCount }}</span>
-				<span class="stat-item">Warnings: {{ warningCount }}</span>
-			</div>
-			<div class="footer-status">
-				<span class="status-item" :class="{ active: autoScroll }">
-					Auto-scroll: {{ autoScroll ? 'ON' : 'OFF' }}
-				</span>
+			<div v-for="(log, index) in logs.logs" :key="log.id || index" :class="['log-entry', log.type]">
+				<div class="log-indicator"></div>
+				<div class="log-content">
+					<div class="log-header">
+						<span class="log-time">{{ log.time }}</span>
+						<span v-if="log.category" class="log-category">{{ log.category }}</span>
+						<span class="log-type">{{ log.type.toUpperCase() }}</span>
+					</div>
+					<div class="log-message">{{ log.message }}</div>
+				</div>
 			</div>
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-	import { computed, ref } from 'vue';
-	import type { LogEntry } from '../types';
+	import { useLogs } from '../composables/useLogs';
 
-	interface Props {
-		logs: LogEntry[];
-		autoScroll: boolean;
-		maxDisplayLogs?: number;
-	}
+	// Composable
+	const logs = useLogs();
 
-	const props = withDefaults(defineProps<Props>(), {
-		maxDisplayLogs: 1000,
-	});
+	// Handlers
+	const handleExportLogs = async (): Promise<void> => {
+		try {
+			await logs.exportLogs();
+		} catch (error) {
+			console.error('Failed to export logs:', error);
+		}
+	};
 
-	const logContainer = ref<HTMLElement>();
-
-	const displayedLogs = computed(() => {
-		return props.logs.slice(-props.maxDisplayLogs);
-	});
-
-	const errorCount = computed(() => props.logs.filter((log) => log.type === 'error').length);
-
-	const warningCount = computed(() => props.logs.filter((log) => log.type === 'warning').length);
-
-	defineExpose({
-		logContainer,
-	});
+	const handleClearLogs = (): void => {
+		logs.clearLogs();
+	};
 </script>
 
 <style scoped>
@@ -86,7 +74,7 @@
 		border: 1px solid #30363d;
 		border-radius: 8px;
 		overflow: hidden;
-		font-family: 'SF Mono', Consolas, monospace;
+		font-family: 'SF Mono', Consolas, 'Monaco', monospace;
 		display: flex;
 		flex-direction: column;
 		height: 100%;
@@ -94,13 +82,22 @@
 		color: #c9d1d9;
 	}
 
+	/* Header */
 	.terminal-header {
 		display: flex;
 		align-items: center;
+		justify-content: space-between;
 		padding: 0.75rem 1rem;
 		background: #161b22;
 		border-bottom: 1px solid #21262d;
 		flex-shrink: 0;
+		gap: 1rem;
+	}
+
+	.header-left {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
 	}
 
 	.terminal-controls {
@@ -127,16 +124,48 @@
 	}
 
 	.terminal-title {
-		flex: 1;
-		text-align: center;
 		color: #c9d1d9;
-		font-weight: 500;
+		font-weight: 600;
 		font-size: 0.875rem;
+		letter-spacing: -0.025em;
+	}
+
+	.header-stats {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.stat-badge {
+		padding: 0.25rem 0.5rem;
+		border-radius: 12px;
+		font-size: 0.625rem;
+		font-weight: 600;
+		line-height: 1;
+		font-family: monospace;
+	}
+
+	.stat-badge.total {
+		background: #21262d;
+		color: #c9d1d9;
+		border: 1px solid #30363d;
+	}
+
+	.stat-badge.error {
+		background: rgba(248, 81, 73, 0.1);
+		color: #f85149;
+		border: 1px solid rgba(248, 81, 73, 0.3);
+	}
+
+	.stat-badge.warning {
+		background: rgba(210, 153, 34, 0.1);
+		color: #d29922;
+		border: 1px solid rgba(210, 153, 34, 0.3);
 	}
 
 	.terminal-actions {
 		display: flex;
-		gap: 0.375rem;
+		gap: 0.5rem;
 	}
 
 	.terminal-btn {
@@ -144,21 +173,20 @@
 		border: 1px solid #30363d;
 		color: #7d8590;
 		cursor: pointer;
-		padding: 0.25rem 0.5rem;
-		border-radius: 3px;
-		font-size: 0.75rem;
+		padding: 0.5rem;
+		border-radius: 4px;
 		transition: all 0.2s ease;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		min-width: 24px;
-		height: 24px;
-		line-height: 1;
+		width: 28px;
+		height: 28px;
 	}
 
 	.terminal-btn:hover {
 		background: #30363d;
 		color: #c9d1d9;
+		border-color: #c9d1d9;
 	}
 
 	.terminal-btn.active {
@@ -168,86 +196,211 @@
 	}
 
 	.terminal-btn.clear:hover {
-		background: #f85149;
+		background: rgba(248, 81, 73, 0.1);
 		border-color: #f85149;
-		color: white;
+		color: #f85149;
 	}
 
+	/* Body */
 	.terminal-body {
 		padding: 1rem;
 		flex: 1;
 		overflow-y: auto;
 		font-size: 0.75rem;
 		line-height: 1.4;
-	}
-
-	.terminal-line {
-		display: flex;
-		gap: 0.5rem;
-		padding: 0.125rem 0;
-		color: #7d8590;
-		align-items: baseline;
-		word-break: break-word;
-	}
-
-	.terminal-prompt {
-		color: #c9d1d9;
-		font-weight: 600;
-		flex-shrink: 0;
-	}
-
-	.terminal-time {
-		color: #6e7681;
-		min-width: 60px;
-		flex-shrink: 0;
-		font-size: 0.7rem;
-	}
-
-	.terminal-category {
-		color: #7d8590;
-		font-weight: 600;
-		font-size: 0.7rem;
-		flex-shrink: 0;
-	}
-
-	.terminal-message {
-		flex: 1;
-		word-wrap: break-word;
-	}
-
-	.terminal-line.success .terminal-message {
-		color: #2ea043;
-	}
-
-	.terminal-line.error .terminal-message {
-		color: #f85149;
-	}
-
-	.terminal-line.warning .terminal-message {
-		color: #d29922;
-	}
-
-	.terminal-line.info .terminal-message {
-		color: #c9d1d9;
-	}
-
-	.terminal-line.debug .terminal-message {
-		color: #7d8590;
-		font-style: italic;
+		background: linear-gradient(145deg, #0d1117 0%, #161b22 100%);
 	}
 
 	.no-logs {
 		display: flex;
+		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 2rem;
-		color: #7d8590;
-		font-style: italic;
+		padding: 3rem 2rem;
+		text-align: center;
+		opacity: 0.7;
 	}
 
-	.terminal-cursor {
+	.no-logs-icon {
+		font-size: 2rem;
+		margin-bottom: 1rem;
+	}
+
+	.no-logs-text {
 		color: #c9d1d9;
-		margin-top: 0.25rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		margin-bottom: 0.5rem;
+	}
+
+	.no-logs-hint {
+		color: #7d8590;
+		font-size: 0.75rem;
+	}
+
+	/* Log Entries */
+	.log-entry {
+		display: flex;
+		gap: 0.75rem;
+		margin-bottom: 0.75rem;
+		padding: 0.75rem;
+		background: #161b22;
+		border: 1px solid #21262d;
+		border-radius: 6px;
+		border-left: 3px solid #30363d;
+		transition: all 0.2s ease;
+	}
+
+	.log-entry:hover {
+		background: #1c2128;
+		border-color: #30363d;
+	}
+
+	.log-entry.success {
+		border-left-color: #2ea043;
+	}
+
+	.log-entry.error {
+		border-left-color: #f85149;
+	}
+
+	.log-entry.warning {
+		border-left-color: #d29922;
+	}
+
+	.log-entry.info {
+		border-left-color: #79c0ff;
+	}
+
+	.log-entry.debug {
+		border-left-color: #7d8590;
+		opacity: 0.8;
+	}
+
+	.log-indicator {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: #30363d;
+		margin-top: 0.5rem;
+		flex-shrink: 0;
+	}
+
+	.log-entry.success .log-indicator {
+		background: #2ea043;
+	}
+
+	.log-entry.error .log-indicator {
+		background: #f85149;
+		animation: pulse 2s infinite;
+	}
+
+	.log-entry.warning .log-indicator {
+		background: #d29922;
+	}
+
+	.log-entry.info .log-indicator {
+		background: #79c0ff;
+	}
+
+	.log-entry.debug .log-indicator {
+		background: #7d8590;
+	}
+
+	.log-content {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.log-header {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-bottom: 0.25rem;
+		flex-wrap: wrap;
+	}
+
+	.log-time {
+		color: #7d8590;
+		font-size: 0.6875rem;
+		font-family: monospace;
+		flex-shrink: 0;
+	}
+
+	.log-category {
+		padding: 0.125rem 0.375rem;
+		background: #21262d;
+		color: #c9d1d9;
+		border-radius: 8px;
+		font-size: 0.625rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.025em;
+		flex-shrink: 0;
+	}
+
+	.log-type {
+		padding: 0.125rem 0.375rem;
+		border-radius: 8px;
+		font-size: 0.625rem;
+		font-weight: 600;
+		letter-spacing: 0.025em;
+		flex-shrink: 0;
+	}
+
+	.log-entry.success .log-type {
+		background: rgba(46, 160, 67, 0.1);
+		color: #2ea043;
+	}
+
+	.log-entry.error .log-type {
+		background: rgba(248, 81, 73, 0.1);
+		color: #f85149;
+	}
+
+	.log-entry.warning .log-type {
+		background: rgba(210, 153, 34, 0.1);
+		color: #d29922;
+	}
+
+	.log-entry.info .log-type {
+		background: rgba(121, 192, 255, 0.1);
+		color: #79c0ff;
+	}
+
+	.log-entry.debug .log-type {
+		background: rgba(125, 133, 144, 0.1);
+		color: #7d8590;
+	}
+
+	.log-message {
+		color: #c9d1d9;
+		word-wrap: break-word;
+		line-height: 1.4;
+	}
+
+	.log-entry.debug .log-message {
+		font-style: italic;
+		opacity: 0.8;
+	}
+
+	/* Terminal Prompt */
+	.terminal-prompt {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 1rem;
+		padding: 0.5rem 0;
+		border-top: 1px solid #21262d;
+	}
+
+	.prompt-symbol {
+		color: #c9d1d9;
+		font-weight: 600;
+	}
+
+	.prompt-cursor {
+		color: #c9d1d9;
 		animation: blink 1s infinite;
 	}
 
@@ -262,44 +415,19 @@
 		}
 	}
 
-	.terminal-footer {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 0.5rem 1rem;
-		background: #161b22;
-		border-top: 1px solid #21262d;
-		font-size: 0.7rem;
-		flex-shrink: 0;
-	}
-
-	.footer-stats {
-		display: flex;
-		gap: 1rem;
-	}
-
-	.stat-item {
-		color: #7d8590;
-		font-family: monospace;
-	}
-
-	.footer-status {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.status-item {
-		color: #7d8590;
-		font-size: 0.7rem;
-	}
-
-	.status-item.active {
-		color: #c9d1d9;
+	@keyframes pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.5;
+		}
 	}
 
 	/* Scrollbar */
 	.terminal-body::-webkit-scrollbar {
-		width: 6px;
+		width: 8px;
 	}
 
 	.terminal-body::-webkit-scrollbar-track {
@@ -308,7 +436,7 @@
 
 	.terminal-body::-webkit-scrollbar-thumb {
 		background: #21262d;
-		border-radius: 3px;
+		border-radius: 4px;
 	}
 
 	.terminal-body::-webkit-scrollbar-thumb:hover {
@@ -318,66 +446,68 @@
 	/* Responsive */
 	@media (max-width: 768px) {
 		.terminal-header {
-			padding: 0.5rem;
+			padding: 0.75rem;
+			flex-wrap: wrap;
+			gap: 0.75rem;
+		}
+
+		.header-stats {
+			order: -1;
+			width: 100%;
+			justify-content: center;
 		}
 
 		.terminal-body {
 			padding: 0.75rem;
-			font-size: 0.7rem;
 		}
 
-		.terminal-footer {
+		.log-entry {
 			padding: 0.5rem;
-			flex-direction: column;
-			gap: 0.25rem;
-			align-items: stretch;
+			margin-bottom: 0.5rem;
 		}
 
-		.footer-stats {
-			justify-content: center;
-			gap: 0.75rem;
-		}
-
-		.terminal-time {
-			min-width: 50px;
-		}
-
-		.terminal-actions {
-			gap: 0.25rem;
+		.log-header {
+			gap: 0.5rem;
 		}
 
 		.terminal-btn {
-			min-width: 20px;
-			height: 20px;
-			font-size: 0.7rem;
+			width: 24px;
+			height: 24px;
+		}
+
+		.terminal-btn svg {
+			width: 10px;
+			height: 10px;
 		}
 	}
 
 	@media (max-width: 480px) {
-		.terminal {
-			min-height: 250px;
-		}
-
 		.terminal-title {
 			display: none;
 		}
 
-		.terminal-line {
-			gap: 0.375rem;
+		.header-left {
+			gap: 0.5rem;
 		}
 
-		.terminal-category {
+		.log-category {
 			display: none;
+		}
+
+		.log-entry {
+			gap: 0.5rem;
 		}
 	}
 
 	/* Reduced motion */
 	@media (prefers-reduced-motion: reduce) {
-		.terminal-cursor {
+		.prompt-cursor,
+		.log-indicator {
 			animation: none;
 		}
 
-		.terminal-btn {
+		.terminal-btn,
+		.log-entry {
 			transition: none;
 		}
 	}

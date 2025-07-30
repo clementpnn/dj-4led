@@ -19,29 +19,22 @@ export {
 	useSystemStore,
 };
 
-// Utility function to reset all stores - SAFE VERSION
+// Utility function to reset all stores
 export const useResetAllStores = () => {
 	const resetAll = () => {
-		// Utiliser les stores de manière sécurisée
 		try {
-			const audioStore = useAudioStore();
-			const effectsStore = useEffectsStore();
-			const colorsStore = useColorsStore();
-			const ledStore = useLEDStore();
-			const framesStore = useFramesStore();
-			const systemStore = useSystemStore();
-			const presetsStore = usePresetsStore();
-			const logsStore = useLogsStore();
+			const stores = [
+				useAudioStore(),
+				useEffectsStore(),
+				useColorsStore(),
+				useLEDStore(),
+				useFramesStore(),
+				useSystemStore(),
+				usePresetsStore(),
+				useLogsStore(),
+			];
 
-			audioStore.reset();
-			effectsStore.reset();
-			colorsStore.reset();
-			ledStore.reset();
-			framesStore.reset();
-			systemStore.reset();
-			presetsStore.reset();
-			logsStore.reset();
-
+			stores.forEach((store) => store.reset());
 			console.log('🔄 All stores reset successfully');
 		} catch (error) {
 			console.error('❌ Error resetting stores:', error);
@@ -55,24 +48,15 @@ export const useResetAllStores = () => {
 export const useStoreDebug = () => {
 	const getAllStates = () => {
 		try {
-			const audioStore = useAudioStore();
-			const effectsStore = useEffectsStore();
-			const colorsStore = useColorsStore();
-			const ledStore = useLEDStore();
-			const framesStore = useFramesStore();
-			const systemStore = useSystemStore();
-			const presetsStore = usePresetsStore();
-			const logsStore = useLogsStore();
-
 			return {
-				audio: audioStore.$state,
-				effects: effectsStore.$state,
-				colors: colorsStore.$state,
-				led: ledStore.$state,
-				frames: framesStore.$state,
-				system: systemStore.$state,
-				presets: presetsStore.$state,
-				logs: logsStore.$state,
+				audio: useAudioStore().$state,
+				effects: useEffectsStore().$state,
+				colors: useColorsStore().$state,
+				led: useLEDStore().$state,
+				frames: useFramesStore().$state,
+				system: useSystemStore().$state,
+				presets: usePresetsStore().$state,
+				logs: useLogsStore().$state,
 			};
 		} catch (error) {
 			console.error('❌ Error getting store states:', error);

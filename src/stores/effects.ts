@@ -1,40 +1,37 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, readonly, ref } from 'vue';
 import { EFFECTS } from '../config';
 import type { Effect, EffectInfo, EffectState } from '../types';
 
 export const useEffectsStore = defineStore('effects', () => {
 	// ===== STATE =====
-
 	const availableEffects = ref<Effect[]>([...EFFECTS]);
 	const currentEffect = ref<EffectState | null>(null);
 	const effectInfo = ref<EffectInfo | null>(null);
 	const loading = ref(false);
 
 	// ===== GETTERS =====
-
 	const currentEffectName = computed(() => currentEffect.value?.name || 'None');
-
 	const isTransitioning = computed(() => currentEffect.value?.transitioning || false);
-
 	const transitionProgress = computed(() => currentEffect.value?.transition_progress || 0);
 
 	const effectsByCategory = computed(() => {
-		const categories: Record<string, Effect[]> = {};
-		availableEffects.value.forEach((effect) => {
-			const category = effect.category || 'other';
-			if (!categories[category]) {
-				categories[category] = [];
-			}
-			categories[category].push(effect);
-		});
-		return categories;
+		return availableEffects.value.reduce(
+			(categories, effect) => {
+				const category = effect.category || 'other';
+				if (!categories[category]) {
+					categories[category] = [];
+				}
+				categories[category].push(effect);
+				return categories;
+			},
+			{} as Record<string, Effect[]>
+		);
 	});
 
 	const getEffectById = computed(() => (id: number) => availableEffects.value.find((effect) => effect.id === id));
 
 	// ===== ACTIONS =====
-
 	const setAvailableEffects = (effects: Effect[]) => {
 		availableEffects.value = effects;
 	};
@@ -83,10 +80,10 @@ export const useEffectsStore = defineStore('effects', () => {
 
 	return {
 		// State
-		availableEffects,
-		currentEffect,
-		effectInfo,
-		loading,
+		availableEffects: readonly(availableEffects),
+		currentEffect: readonly(currentEffect),
+		effectInfo: readonly(effectInfo),
+		loading: readonly(loading),
 
 		// Getters
 		currentEffectName,

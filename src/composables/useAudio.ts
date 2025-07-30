@@ -1,197 +1,351 @@
+// composables/useAudio.ts
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { onMounted, onUnmounted } from 'vue';
 import { useAudioStore } from '../stores/audio';
-import { useLogsStore } from '../stores/logs';
 import type { ActionResult } from '../types';
 
 export function useAudio() {
+	// Store instance
 	const audioStore = useAudioStore();
-	const logsStore = useLogsStore();
 
+	// Event listeners references
 	let unlistenSpectrum: UnlistenFn | null = null;
 	let unlistenAudioStatus: UnlistenFn | null = null;
+	let unlistenGainChanged: UnlistenFn | null = null;
 
-	// Récupérer les périphériques audio disponibles
-	const getAudioDevices = async (): Promise<ActionResult> => {
-		audioStore.setLoading(true);
-		try {
-			const devices = await invoke<string[]>('get_audio_devices');
-			audioStore.setDevices(devices);
-			logsStore.addLog(`🎤 Found ${devices.length} audio devices`, 'success', 'audio');
-			return { success: true, message: `Found ${devices.length} audio devices` };
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			audioStore.setError(errorMessage);
-			logsStore.addLog(`Failed to get audio devices: ${errorMessage}`, 'error', 'audio');
-			return { success: false, message: `Failed to get audio devices: ${errorMessage}` };
-		} finally {
-			audioStore.setLoading(false);
-		}
-	};
+	// ===== AUDIO CAPTURE ACTIONS =====
 
-	// Démarrer la capture audio
-	const startAudioCapture = async (): Promise<ActionResult> => {
+	const startCapture = async (): Promise<ActionResult> => {
 		if (audioStore.state.isCapturing) {
 			return { success: false, message: 'Audio capture already running' };
 		}
 
 		audioStore.setLoading(true);
+		audioStore.clearError();
+
 		try {
-			const result = await invoke<string>('start_audio_capture');
-			audioStore.setCapturing(true);
-			audioStore.clearError();
-			logsStore.addLog('🎧 Audio capture started', 'success', 'audio');
-			return { success: true, message: result };
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
+			const result = await invoke<any>('audio_start_capture');
+			console.log('🎧 Audio capture started:', result);
+
+			return {
+				success: true,
+				message: result.message || 'Audio capture started',
+				data: result,
+			};
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
 			audioStore.setError(errorMessage);
-			logsStore.addLog(`Failed to start audio capture: ${errorMessage}`, 'error', 'audio');
-			return { success: false, message: `Failed to start audio capture: ${errorMessage}` };
+			console.error('❌ Failed to start audio:', errorMessage);
+			return { success: false, message: errorMessage };
 		} finally {
 			audioStore.setLoading(false);
 		}
 	};
 
-	// Arrêter la capture audio
-	const stopAudioCapture = async (): Promise<ActionResult> => {
+	const stopCapture = async (): Promise<ActionResult> => {
 		audioStore.setLoading(true);
+
 		try {
-			const result = await invoke<string>('stop_audio_capture');
+			const result = await invoke<any>('audio_stop_capture');
 			audioStore.setCapturing(false);
-			logsStore.addLog('🛑 Audio capture stopped', 'info', 'audio');
-			return { success: true, message: result };
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			logsStore.addLog(`Failed to stop audio capture: ${errorMessage}`, 'error', 'audio');
-			return { success: false, message: `Failed to stop audio capture: ${errorMessage}` };
+			console.log('🛑 Audio capture stopped:', result);
+
+			return {
+				success: true,
+				message: result.message || 'Audio capture stopped',
+				data: result,
+			};
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			audioStore.setError(errorMessage);
+			console.error('❌ Failed to stop audio:', errorMessage);
+			return { success: false, message: errorMessage };
 		} finally {
 			audioStore.setLoading(false);
 		}
 	};
 
-	// Définir le gain audio
-	const setAudioGain = async (gain: number): Promise<ActionResult> => {
+	// ===== GAIN MANAGEMENT =====
+
+	const setGain = async (newGain: number): Promise<ActionResult> => {
+		if (newGain < 0.1 || newGain > 5.0) {
+			return { success: false, message: 'Gain must be between 0.1 and 5.0' };
+		}
+
 		try {
-			const result = await invoke<string>('set_audio_gain', { gain });
-			audioStore.setGain(gain);
-			logsStore.addLog(`🔊 Audio gain set to ${gain.toFixed(1)}x`, 'info', 'audio');
-			return { success: true, message: result };
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			logsStore.addLog(`Failed to set audio gain: ${errorMessage}`, 'error', 'audio');
-			return { success: false, message: `Failed to set audio gain: ${errorMessage}` };
+			const result = await invoke<any>('audio_set_gain', { gain: newGain });
+			audioStore.setGain(newGain);
+			console.log(`🔊 Audio gain set to ${newGain}:`, result);
+
+			return {
+				success: true,
+				message: result.message || `Gain set to ${newGain}`,
+				data: result,
+			};
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			audioStore.setError(errorMessage);
+			console.error('❌ Failed to set gain:', errorMessage);
+			return { success: false, message: errorMessage };
 		}
 	};
 
-	// Récupérer le gain audio actuel
-	const getAudioGain = async (): Promise<number> => {
+	const getGain = async (): Promise<ActionResult> => {
 		try {
-			const gain = await invoke<number>('get_audio_gain');
-			audioStore.setGain(gain);
-			return gain;
-		} catch (error) {
-			logsStore.addLog('Failed to get audio gain', 'warning', 'audio');
-			return audioStore.state.currentGain;
+			const currentGain = await invoke<number>('audio_get_gain');
+			audioStore.setGain(currentGain);
+
+			return {
+				success: true,
+				message: 'Gain retrieved successfully',
+				data: currentGain,
+			};
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			console.warn('Failed to get audio gain:', errorMessage);
+			return {
+				success: false,
+				message: errorMessage,
+				data: audioStore.state.currentGain,
+			};
 		}
 	};
 
-	// Récupérer le spectre actuel
-	const getCurrentSpectrum = async (): Promise<number[]> => {
+	// ===== DEVICE MANAGEMENT =====
+
+	const getDevices = async (): Promise<ActionResult> => {
+		audioStore.setLoading(true);
+
 		try {
-			const spectrum = await invoke<number[]>('get_current_spectrum');
-			audioStore.updateSpectrum(spectrum);
-			return spectrum;
-		} catch (error) {
-			logsStore.addLog('Failed to get current spectrum', 'warning', 'audio');
-			return [];
+			const result = await invoke<any>('audio_get_devices');
+			const devices = result.devices || [];
+
+			// Extract device names for the store
+			const deviceNames = devices.map((device: any) => device.name);
+			audioStore.setDevices(deviceNames);
+
+			console.log(`🎤 Found ${devices.length} audio devices:`, result);
+
+			return {
+				success: true,
+				message: `Found ${devices.length} audio devices`,
+				data: devices,
+			};
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			audioStore.setError(errorMessage);
+			console.error('❌ Failed to get audio devices:', errorMessage);
+			return { success: false, message: errorMessage };
+		} finally {
+			audioStore.setLoading(false);
 		}
 	};
 
-	// Gestionnaire des données de spectre
-	const handleSpectrumData = (spectrum: number[]): void => {
-		audioStore.updateSpectrum(spectrum);
+	// ===== STATUS & DIAGNOSTICS =====
+
+	const getStatus = async (): Promise<ActionResult> => {
+		try {
+			const status = await invoke<any>('audio_get_status');
+
+			// Update store with backend status
+			audioStore.setCapturing(status.running);
+			audioStore.setGain(status.gain);
+
+			console.log('📊 Audio status:', status);
+			return { success: true, message: 'Status retrieved', data: status };
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			console.warn('Failed to get audio status:', errorMessage);
+			return { success: false, message: errorMessage };
+		}
 	};
 
-	// Gestionnaire du statut audio
-	const handleAudioStatus = (status: any): void => {
-		logsStore.addLog(`📊 Audio status: ${status.status}`, 'info', 'audio');
+	const getSpectrum = async (): Promise<ActionResult> => {
+		try {
+			const result = await invoke<any>('audio_get_spectrum');
 
-		if (status.status === 'started') {
-			audioStore.setCapturing(true);
-			audioStore.clearError();
-		} else if (status.status === 'stopped' || status.status === 'error') {
-			audioStore.setCapturing(false);
-			if (status.status === 'error') {
-				audioStore.setError(status.message);
+			if (result.spectrum && Array.isArray(result.spectrum)) {
+				audioStore.updateSpectrum(result.spectrum);
 			}
+
+			return { success: true, message: 'Spectrum retrieved', data: result };
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			console.warn('Failed to get spectrum:', errorMessage);
+			return { success: false, message: errorMessage };
 		}
 	};
 
-	// Configuration des écouteurs d'événements
-	const setupEventListeners = async (): Promise<void> => {
+	const testInput = async (): Promise<ActionResult> => {
 		try {
-			unlistenSpectrum = await listen<number[]>('spectrum_data', (event) => {
-				handleSpectrumData(event.payload);
-			});
+			const result = await invoke<any>('audio_test_input');
+			console.log('🔍 Audio input test:', result);
 
-			unlistenAudioStatus = await listen<any>('audio_status', (event) => {
-				handleAudioStatus(event.payload);
-			});
-
-			logsStore.addLog('✅ Audio event listeners ready', 'success', 'audio');
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			audioStore.setError(`Failed to setup event listeners: ${errorMessage}`);
-			logsStore.addLog(`❌ Error setting up audio event listeners: ${errorMessage}`, 'error', 'audio');
+			return {
+				success: true,
+				message: result.message || 'Audio test completed',
+				data: result,
+			};
+		} catch (err) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			audioStore.setError(errorMessage);
+			console.error('❌ Audio test failed:', errorMessage);
+			return { success: false, message: errorMessage };
 		}
 	};
 
-	// Nettoyage
+	// ===== EVENT HANDLERS =====
+
+	const handleSpectrumUpdate = (event: any) => {
+		const data = event.payload;
+
+		// Validate payload structure
+		if (data && Array.isArray(data.spectrum)) {
+			audioStore.updateSpectrum(data.spectrum);
+		} else if (Array.isArray(data)) {
+			// Fallback: direct array
+			audioStore.updateSpectrum(data);
+		} else {
+			console.warn('🔊 Invalid spectrum data received:', data);
+		}
+	};
+
+	const handleAudioStatus = (event: any) => {
+		const status = event.payload;
+		console.log('📊 Audio status event:', status);
+
+		if (!status || typeof status.status !== 'string') {
+			console.warn('Invalid audio status event:', status);
+			return;
+		}
+
+		switch (status.status) {
+			case 'started':
+				audioStore.setCapturing(true);
+				audioStore.clearError();
+				break;
+
+			case 'stopped':
+				audioStore.setCapturing(false);
+				audioStore.updateSpectrum([]); // Clear spectrum
+				break;
+
+			case 'error':
+				audioStore.setCapturing(false);
+				audioStore.updateSpectrum([]); // Clear spectrum
+				audioStore.setError(status.message || 'Audio error occurred');
+				break;
+
+			default:
+				console.warn('Unknown audio status:', status.status);
+		}
+	};
+
+	const handleGainChanged = (event: any) => {
+		const data = event.payload;
+
+		if (data && typeof data.gain === 'number') {
+			audioStore.setGain(data.gain);
+			console.log(`🔊 Gain changed to ${data.gain}`);
+		} else {
+			console.warn('Invalid gain change event:', data);
+		}
+	};
+
+	// ===== EVENT LISTENERS SETUP =====
+
+	const setupListeners = async (): Promise<void> => {
+		try {
+			unlistenSpectrum = await listen('spectrum_update', handleSpectrumUpdate);
+			unlistenAudioStatus = await listen('audio_status', handleAudioStatus);
+			unlistenGainChanged = await listen('audio_gain_changed', handleGainChanged);
+
+			console.log('✅ Audio event listeners setup complete');
+		} catch (err) {
+			console.error('❌ Failed to setup audio event listeners:', err);
+			audioStore.setError('Failed to setup event listeners');
+		}
+	};
+
 	const cleanup = (): void => {
-		if (unlistenSpectrum) {
-			unlistenSpectrum();
-			unlistenSpectrum = null;
-		}
-		if (unlistenAudioStatus) {
-			unlistenAudioStatus();
-			unlistenAudioStatus = null;
+		const listeners = [
+			{ fn: unlistenSpectrum, name: 'spectrum_update' },
+			{ fn: unlistenAudioStatus, name: 'audio_status' },
+			{ fn: unlistenGainChanged, name: 'audio_gain_changed' },
+		];
+
+		listeners.forEach(({ fn, name }) => {
+			if (fn) {
+				try {
+					fn();
+					console.log(`✅ Cleaned up ${name} listener`);
+				} catch (err) {
+					console.warn(`❌ Error cleaning up ${name} listener:`, err);
+				}
+			}
+		});
+
+		// Reset listener references
+		unlistenSpectrum = null;
+		unlistenAudioStatus = null;
+		unlistenGainChanged = null;
+	};
+
+	// ===== INITIALIZATION =====
+
+	const initialize = async (): Promise<void> => {
+		console.log('🎧 Initializing audio composable...');
+
+		try {
+			await setupListeners();
+			await getDevices();
+			await getStatus();
+			await getGain();
+			audioStore.setCapturing(false);
+			audioStore.updateSpectrum([]);
+
+			console.log('✅ Audio composable initialized successfully');
+		} catch (err) {
+			console.error('❌ Failed to initialize audio composable:', err);
+			audioStore.setError('Failed to initialize audio system');
 		}
 	};
 
-	// Lifecycle
+	// ===== LIFECYCLE =====
+
 	onMounted(() => {
-		logsStore.addLog('🎧 Audio composable mounted', 'debug', 'audio');
-		setupEventListeners();
-		getAudioDevices();
-		getAudioGain();
+		console.log('🎧 Audio composable mounted');
+		initialize();
 	});
 
 	onUnmounted(() => {
-		logsStore.addLog('💀 Audio composable unmounting', 'debug', 'audio');
+		console.log('💀 Audio composable unmounting');
 		cleanup();
+
+		// Stop capture if running
 		if (audioStore.state.isCapturing) {
-			stopAudioCapture();
+			stopCapture().catch(console.error);
 		}
 	});
 
+	// ===== PUBLIC API =====
+
 	return {
-		// Store state access
-		state: audioStore.state,
-		loading: audioStore.loading,
-		isHealthy: audioStore.isHealthy,
-		spectrumPeak: audioStore.spectrumPeak,
-		spectrumRMS: audioStore.spectrumRMS,
-		selectedDevice: audioStore.selectedDevice,
+		...audioStore,
 
 		// Actions
-		getAudioDevices,
-		startAudioCapture,
-		stopAudioCapture,
-		setAudioGain,
-		getAudioGain,
-		getCurrentSpectrum,
+		startCapture,
+		stopCapture,
+		setGain,
+		getGain,
+		getDevices,
+		getStatus,
+		getSpectrum,
+		testInput,
+
+		// Utilities
+		initialize,
 		cleanup,
-		reset: audioStore.reset,
 	};
 }

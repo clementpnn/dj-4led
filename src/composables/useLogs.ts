@@ -1,44 +1,44 @@
-import { nextTick, ref } from 'vue';
+// composables/useLogs.ts
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useLogsStore } from '../stores/logs';
 import type { ActionResult, LogEntry } from '../types';
 
 export function useLogs() {
+	// Store instance
 	const logsStore = useLogsStore();
-	const logContainer = ref<HTMLElement | undefined>(undefined);
-	const autoScroll = ref(true);
 
-	// Ajouter un log simple
+	// Local UI state
+	const logContainer = ref<HTMLElement | undefined>(undefined);
+	const searchText = ref('');
+	const selectedType = ref<string>('all');
+
+	// ===== COMPUTED =====
+	const filteredLogs = computed(() => {
+		let result = logsStore.filteredLogs;
+
+		// Additional local filtering
+		if (selectedType.value !== 'all') {
+			result = result.filter((log) => log.type === selectedType.value);
+		}
+
+		if (searchText.value.trim()) {
+			const search = searchText.value.toLowerCase();
+			result = result.filter(
+				(log) =>
+					log.message.toLowerCase().includes(search) ||
+					(log.category && log.category.toLowerCase().includes(search))
+			);
+		}
+
+		return result.slice().reverse(); // Most recent first
+	});
+
+	// ===== LOGGING ACTIONS =====
 	const log = (message: string, type: LogEntry['type'] = 'info', category?: LogEntry['category']): void => {
 		logsStore.addLog(message, type, category);
 		handleAutoScroll();
 	};
 
-	// Auto-scroll
-	const handleAutoScroll = (): void => {
-		if (logContainer.value && autoScroll.value) {
-			nextTick(() => {
-				if (logContainer.value) {
-					logContainer.value.scrollTop = logContainer.value.scrollHeight;
-				}
-			});
-		}
-	};
-
-	// Toggle auto-scroll
-	const toggleAutoScroll = (): void => {
-		autoScroll.value = !autoScroll.value;
-		if (autoScroll.value) {
-			handleAutoScroll();
-		}
-	};
-
-	// Logs d'initialisation
-	const initLogs = (): void => {
-		logsStore.initLogs();
-		handleAutoScroll();
-	};
-
-	// Log pour les actions avec emoji automatique
 	const logAction = (
 		action: string,
 		result: { success: boolean; message: string },
@@ -49,60 +49,102 @@ export function useLogs() {
 		log(`${emoji} ${action}: ${result.message}`, type, category);
 	};
 
-	// Export simple en JSON
+	// Simple helpers
+	const logInfo = (message: string, category?: LogEntry['category']) => log(message, 'info', category);
+	const logSuccess = (message: string, category?: LogEntry['category']) => log(message, 'success', category);
+	const logWarning = (message: string, category?: LogEntry['category']) => log(message, 'warning', category);
+	const logError = (message: string, category?: LogEntry['category']) => log(message, 'error', category);
+	const logDebug = (message: string, category?: LogEntry['category']) => log(message, 'debug', category);
+
+	// ===== UI ACTIONS =====
+	const handleAutoScroll = (): void => {
+		nextTick(() => {
+			if (logContainer.value) {
+				logContainer.value.scrollTop = logContainer.value.scrollHeight;
+			}
+		});
+	};
+
+	// ===== EXPORT =====
 	const exportLogs = (): ActionResult => {
 		try {
 			const data = logsStore.exportLogs(false);
+
 			const blob = new Blob([data], { type: 'application/json' });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `dj4led-logs-${new Date().toISOString().split('T')[0]}.json`;
+			a.download = `logs-${new Date().toISOString().split('T')[0]}.json`;
 			document.body.appendChild(a);
 			a.click();
 			document.body.removeChild(a);
 			URL.revokeObjectURL(url);
 
-			log('📤 Logs exported successfully', 'success', 'user');
+			logSuccess('Logs exported successfully', 'system');
 			return { success: true, message: 'Logs exported successfully' };
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			log(`Failed to export logs: ${errorMessage}`, 'error', 'user');
-			return { success: false, message: `Failed to export logs: ${errorMessage}` };
+		} catch (err) {
+			logError('Failed to export logs', 'system');
+			return { success: false, message: 'Failed to export logs' };
 		}
 	};
 
-	// Filtrer par type
-	const filterByType = (types: LogEntry['type'][]): void => {
-		logsStore.setFilter({ types });
+	// ===== UTILITIES =====
+	const getEmoji = (type: LogEntry['type']): string => {
+		const emojis = {
+			debug: '🐛',
+			info: 'ℹ️',
+			success: '✅',
+			warning: '⚠️',
+			error: '❌',
+		};
+		return emojis[type] || 'ℹ️';
 	};
 
-	// Rechercher
-	const search = (searchText: string): void => {
-		logsStore.setFilter({ searchText });
+	const formatTime = (timestamp: number): string => {
+		return new Date(timestamp).toLocaleTimeString();
 	};
 
+	const clearLogs = (): void => {
+		logsStore.clearLogs();
+	};
+
+	// ===== LIFECYCLE =====
+	onMounted(() => {
+		if (logsStore.logs.length === 0) {
+			logsStore.initLogs();
+		}
+		handleAutoScroll();
+	});
+
+	// ===== PUBLIC API =====
 	return {
-		// Store state
+		// Store access
 		logs: logsStore.logs,
-		filteredLogs: logsStore.filteredLogs,
 		logStats: logsStore.logStats,
-		recentErrors: logsStore.recentErrors,
-		recentWarnings: logsStore.recentWarnings,
 
 		// Local state
 		logContainer,
-		autoScroll,
+		searchText,
+		selectedType,
+
+		// Computed
+		filteredLogs,
 
 		// Actions
 		log,
 		logAction,
-		toggleAutoScroll,
+		logInfo,
+		logSuccess,
+		logWarning,
+		logError,
+		logDebug,
+
+		// UI
 		exportLogs,
-		filterByType,
-		search,
-		clearLogs: logsStore.clearLogs,
-		initLogs,
-		reset: logsStore.reset,
+		clearLogs,
+
+		// Utils
+		getEmoji,
+		formatTime,
 	};
 }

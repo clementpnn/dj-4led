@@ -1,174 +1,155 @@
-use anyhow::Result;
 use std::net::UdpSocket;
-use std::time::Duration;
 
-/// Client Art-Net pour l'envoi de données DMX
+/// Client Art-Net optimisé pour production
 pub struct ArtNetClient {
     socket: UdpSocket,
-    target_ip: String,
     packets_sent: u64,
     bytes_sent: u64,
 }
 
 impl ArtNetClient {
-    /// Crée un nouveau client Art-Net
-    pub fn new(target_ip: &str) -> Result<Self> {
-        println!("🌐 [ART-NET] Client créé pour {}", target_ip);
+    /// Créer client Art-Net pour production
+    pub fn new() -> Result<Self, String> {
+        println!("🌐 [ARTNET] Création client Art-Net PRODUCTION");
 
-        // Créer socket avec configuration améliorée
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
-        socket.set_nonblocking(false)?;
+        let socket = UdpSocket::bind("0.0.0.0:0")
+            .map_err(|e| {
+                let error = format!("Erreur socket UDP PRODUCTION: {}", e);
+                println!("❌ [ARTNET] {}", error);
+                error
+            })?;
 
-        // Ajouter timeout pour éviter les blocages
-        socket.set_write_timeout(Some(Duration::from_millis(10)))?;
-        socket.set_broadcast(true)?; // Permet le broadcast si nécessaire
+        // Configuration optimale pour production
+        socket.set_broadcast(true).map_err(|e| {
+            format!("Erreur broadcast PRODUCTION: {}", e)
+        })?;
+
+        println!("✅ [ARTNET] Socket UDP PRODUCTION créé");
 
         Ok(Self {
             socket,
-            target_ip: target_ip.to_string(),
             packets_sent: 0,
             bytes_sent: 0,
         })
     }
 
-    /// Envoie des données DMX pour un univers spécifique
-    pub fn send_universe(&mut self, universe: u16, dmx_data: &[u8]) -> Result<usize> {
-        // Validation des données
+    /// Envoyer données DMX - Format exact pour BC216
+    pub fn send_universe(&mut self, universe: u16, dmx_data: &[u8], target: &str) -> Result<usize, String> {
         if dmx_data.len() > 512 {
-            let error = format!("DMX data too large: {} bytes (max 512)", dmx_data.len());
-            anyhow::bail!(error);
+            return Err(format!("Données DMX trop larges: {} bytes (max 512)", dmx_data.len()));
         }
 
-        // Validation univers
-        if universe > 32767 {
-            let error = format!("Universe too large: {} (max 32767)", universe);
-            anyhow::bail!(error);
-        }
-
-        // Création du paquet Art-Net
+        // Créer paquet Art-Net BC216-compatible
         let packet = self.create_artnet_packet(universe, dmx_data);
-        let addr = format!("{}:6454", self.target_ip);
 
-        // Envoi du paquet avec retry en cas d'échec temporaire
-        let mut attempts = 0;
-        let max_attempts = 2;
+        // Ajouter port Art-Net si manquant
+        let target_with_port = if target.contains(':') {
+            target.to_string()
+        } else {
+            format!("{}:6454", target)
+        };
 
-        loop {
-            match self.socket.send_to(&packet, &addr) {
-                Ok(bytes) => {
-                    // Mise à jour des statistiques
-                    self.packets_sent += 1;
-                    self.bytes_sent += bytes as u64;
-                    return Ok(bytes);
-                }
-                Err(e) => {
-                    attempts += 1;
-                    if attempts >= max_attempts {
-                        let error = format!("Failed to send to {} after {} attempts: {}", addr, attempts, e);
-                        return Err(anyhow::anyhow!(error));
+        match self.socket.send_to(&packet, &target_with_port) {
+            Ok(bytes) => {
+                self.packets_sent += 1;
+                self.bytes_sent += bytes as u64;
+
+                // Log adaptatif selon le target
+                if target_with_port.starts_with("192.168.1") {
+                    if self.packets_sent % 2000 == 0 {
+                        println!("📡 [ARTNET] PRODUCTION {} packets → {}", self.packets_sent, target_with_port);
                     }
-                    // Petit délai avant retry
-                    std::thread::sleep(Duration::from_millis(1));
+                } else {
+                    if self.packets_sent % 1000 == 0 {
+                        println!("📡 [ARTNET] SIMULATEUR {} packets → {}", self.packets_sent, target_with_port);
+                    }
                 }
+
+                Ok(bytes)
+            }
+            Err(e) => {
+                let error = format!("Erreur PRODUCTION {} univers {}: {}", target_with_port, universe, e);
+                if self.packets_sent % 100 == 0 {  // Moins de logs d'erreur
+                    println!("❌ [ARTNET] {}", error);
+                }
+                Err(error)
             }
         }
     }
 
-    /// Crée un paquet Art-Net conforme aux spécifications
+    /// Créer paquet Art-Net compatible BC216 - Format exact
     fn create_artnet_packet(&self, universe: u16, dmx_data: &[u8]) -> Vec<u8> {
-        let mut packet = Vec::with_capacity(18 + dmx_data.len());
+        // Header Art-Net BC216 - Format validé avec l'ancien code
+        let mut packet = vec![
+            b'A', b'r', b't', b'-', b'N', b'e', b't', 0,  // "Art-Net\0"
+            0x00, 0x50,                                     // OpCode (ArtDMX)
+            0,                                              // ProtVer MSB
+            14,                                             // ProtVer LSB (version 14)
+            0,                                              // Sequence
+            0,                                              // Physical
+            (universe & 0xFF) as u8,                       // Universe LSB
+            (universe >> 8) as u8,                         // Universe MSB
+            0x02,                                           // Length MSB (512 = 0x0200)
+            0x00,                                           // Length LSB
+        ];
 
-        // Header Art-Net selon la spécification officielle
-        packet.extend_from_slice(b"Art-Net\0"); // 8 bytes - ID string
-        packet.extend_from_slice(&[0x00, 0x50]); // 2 bytes - OpCode (ArtDMX = 0x5000 little endian)
-        packet.extend_from_slice(&[0x00, 0x0E]); // 2 bytes - ProtVer (version 14)
-        packet.push(0); // 1 byte - Sequence (0 = pas de séquençage)
-        packet.push(0); // 1 byte - Physical (port physique)
-        packet.extend_from_slice(&universe.to_le_bytes()); // 2 bytes - Universe (little endian)
-        packet.extend_from_slice(&(dmx_data.len() as u16).to_be_bytes()); // 2 bytes - Length (big endian)
+        // Toujours 512 bytes de données DMX pour BC216
+        let mut dmx_data_padded = vec![0u8; 512];
+        let copy_len = dmx_data.len().min(512);
+        dmx_data_padded[..copy_len].copy_from_slice(&dmx_data[..copy_len]);
 
-        // Données DMX
-        packet.extend_from_slice(dmx_data);
-
+        packet.extend_from_slice(&dmx_data_padded);
         packet
     }
 
-    /// Obtient l'IP cible
-    pub fn target_ip(&self) -> &str {
-        &self.target_ip
+    /// Test connectivité production - Test projecteur
+    pub fn test_connectivity(&mut self, target: &str) -> Result<(), String> {
+        println!("🔍 [ARTNET] Test PRODUCTION connectivité: {}", target);
+
+        // Test avec projecteur si c'est le premier contrôleur
+        if target.starts_with("192.168.1.45") {
+            println!("🎥 [ARTNET] Test projecteur sur {}", target);
+
+            let mut test_data = vec![0u8; 512];
+            test_data[0] = 128; // Rouge modéré
+            test_data[1] = 0;
+            test_data[2] = 0;
+
+            self.send_universe(200, &test_data, target)?;
+
+            // Petit délai puis extinction
+            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            let black_data = vec![0u8; 512];
+            self.send_universe(200, &black_data, target)?;
+
+            println!("✅ [ARTNET] Test projecteur PRODUCTION OK: {}", target);
+        } else {
+            // Test standard pour autres contrôleurs
+            let mut test_data = vec![0u8; 512];
+            test_data[0] = 64;  // Rouge faible
+
+            self.send_universe(0, &test_data, target)?;
+            println!("✅ [ARTNET] Test contrôleur PRODUCTION OK: {}", target);
+        }
+
+        Ok(())
     }
 
-    /// Obtient les statistiques d'envoi
+    /// Statistiques production
     pub fn get_stats(&self) -> (u64, u64) {
         (self.packets_sent, self.bytes_sent)
     }
-}
 
-/// Utilitaires pour la manipulation des couleurs LED
-pub mod utils {
-    /// Applique la correction de luminosité sur un pixel RGB
-    pub fn apply_brightness_rgb(r: u8, g: u8, b: u8, brightness: f32) -> (u8, u8, u8) {
-        let brightness = brightness.clamp(0.0, 1.0);
-        (
-            (r as f32 * brightness) as u8,
-            (g as f32 * brightness) as u8,
-            (b as f32 * brightness) as u8,
-        )
-    }
+    /// Reset stats
+    pub fn reset_stats(&mut self) {
+        let old_packets = self.packets_sent;
+        let old_bytes = self.bytes_sent;
 
-    /// Applique la correction gamma sur un pixel RGB
-    pub fn apply_gamma_rgb(r: u8, g: u8, b: u8, gamma: f32) -> (u8, u8, u8) {
-        let inv_gamma = 1.0 / gamma;
-        (
-            ((r as f32 / 255.0).powf(inv_gamma) * 255.0) as u8,
-            ((g as f32 / 255.0).powf(inv_gamma) * 255.0) as u8,
-            ((b as f32 / 255.0).powf(inv_gamma) * 255.0) as u8,
-        )
-    }
+        self.packets_sent = 0;
+        self.bytes_sent = 0;
 
-    /// Applique une température de couleur
-    pub fn apply_color_temperature_rgb(r: u8, g: u8, b: u8, temperature: f32) -> (u8, u8, u8) {
-        if temperature == 1.0 {
-            return (r, g, b);
-        }
-
-        let result = if temperature < 1.0 {
-            (r, g, (b as f32 / temperature) as u8)
-        } else {
-            ((r as f32 / temperature) as u8, g, b)
-        };
-
-        result
-    }
-
-    /// Convertit HSV en RGB
-    pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
-        let h = h % 360.0;
-        let s = s.clamp(0.0, 1.0);
-        let v = v.clamp(0.0, 1.0);
-
-        let c = v * s;
-        let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
-        let m = v - c;
-
-        let (r, g, b) = if h < 60.0 {
-            (c, x, 0.0)
-        } else if h < 120.0 {
-            (x, c, 0.0)
-        } else if h < 180.0 {
-            (0.0, c, x)
-        } else if h < 240.0 {
-            (0.0, x, c)
-        } else if h < 300.0 {
-            (x, 0.0, c)
-        } else {
-            (c, 0.0, x)
-        };
-
-        (
-            ((r + m) * 255.0) as u8,
-            ((g + m) * 255.0) as u8,
-            ((b + m) * 255.0) as u8,
-        )
+        println!("📊 [ARTNET] PRODUCTION Stats reset - Ancien: {} packets, {} bytes",
+                 old_packets, old_bytes);
     }
 }

@@ -7,22 +7,22 @@
 		<!-- Controls -->
 		<div class="controls-section">
 			<div class="control-group">
-				<label class="control-label">Brightness {{ Math.round(brightness * 100) }}%</label>
+				<label class="control-label">Brightness {{ Math.round(led.brightness * 100) }}%</label>
 				<input
 					type="range"
 					class="brightness-slider"
-					:value="brightness"
+					:value="led.brightness"
 					min="0"
 					max="1"
 					step="0.05"
-					:disabled="loading"
+					:disabled="led.loading"
 					@input="handleBrightnessChange"
 				/>
 			</div>
 
 			<div class="control-group">
 				<label class="control-label">Mode</label>
-				<select class="mode-select" :value="currentMode" :disabled="loading" @change="handleModeChange">
+				<select class="mode-select" :value="led.currentMode" :disabled="led.loading" @change="handleModeChange">
 					<option value="simulator">Simulator</option>
 					<option value="production">Production</option>
 				</select>
@@ -30,27 +30,27 @@
 
 			<button
 				class="control-btn"
-				:class="{ active: isRunning }"
-				:disabled="loading"
-				@click="$emit('output-toggle')"
+				:class="{ active: led.isRunning }"
+				:disabled="led.loading"
+				@click="handleOutputToggle"
 			>
-				{{ isRunning ? 'Stop' : 'Start' }}
+				{{ led.isRunning ? 'Stop' : 'Start' }}
 			</button>
 		</div>
 
 		<!-- Frame Display -->
 		<div class="frame-section">
-			<div class="frame-container" :class="{ active: isRunning }">
-				<div v-if="frameImageUrl" class="frame-display">
-					<img :src="frameImageUrl" alt="LED Frame" class="frame-image" />
+			<div class="frame-container" :class="{ active: led.isRunning }">
+				<div v-if="frames.hasCurrentFrame" class="frame-display">
+					<img :src="currentFrameImageUrl" alt="LED Frame" class="frame-image" />
 					<div class="frame-overlay">
-						<span class="frame-info">{{ currentFrame?.width }}x{{ currentFrame?.height }}</span>
-						<span class="frame-fps">{{ frameRate }} FPS</span>
+						<span class="frame-info">{{ led.matrixSize }}</span>
+						<span class="frame-fps">{{ frames.stats.fps }} FPS</span>
 					</div>
 				</div>
 				<div v-else class="no-frame">
 					<div class="no-frame-text">
-						{{ isRunning ? 'Waiting for frames...' : 'LED output stopped' }}
+						{{ led.isRunning ? 'Waiting for frames...' : 'LED output stopped' }}
 					</div>
 				</div>
 			</div>
@@ -60,15 +60,15 @@
 		<div class="metrics-section">
 			<div class="metric">
 				<span class="metric-label">Frames</span>
-				<span class="metric-value">{{ frameCount }}</span>
+				<span class="metric-value">{{ frames.frameCount }}</span>
 			</div>
 			<div class="metric">
 				<span class="metric-label">Success</span>
-				<span class="metric-value">{{ metrics.successRate.toFixed(1) }}%</span>
+				<span class="metric-value">{{ frames.successRate.value.toFixed(1) }}%</span>
 			</div>
 			<div class="metric">
 				<span class="metric-label">Controllers</span>
-				<span class="metric-value">{{ controllerCount }}</span>
+				<span class="metric-value">{{ led.controllerCount }}</span>
 			</div>
 		</div>
 
@@ -76,63 +76,141 @@
 		<div class="status-section">
 			<div class="status-item">
 				<span class="status-label">Output</span>
-				<span class="status-value" :class="{ active: isRunning }">
-					{{ isRunning ? 'RUNNING' : 'STOPPED' }}
+				<span class="status-value" :class="{ active: led.isRunning }">
+					{{ led.isRunning ? 'RUNNING' : 'STOPPED' }}
 				</span>
 			</div>
 			<div class="status-item">
 				<span class="status-label">Health</span>
-				<span class="status-value" :class="{ active: isHealthy }">
-					{{ isHealthy ? 'GOOD' : 'ISSUES' }}
+				<span class="status-value" :class="{ active: led.isHealthy }">
+					{{ led.isHealthy ? 'GOOD' : 'ISSUES' }}
 				</span>
+			</div>
+		</div>
+
+		<!-- Frame Controls -->
+		<div class="frame-controls-section">
+			<div class="section-header">
+				<h3>Frame Controls</h3>
+				<div class="health-indicator" :class="frames.healthStatus">
+					{{ frames.healthStatus.value.toUpperCase() }}
+				</div>
+			</div>
+			<div class="frame-controls">
+				<button class="control-btn secondary" :disabled="frames.loading" @click="handleRefreshFrame">
+					{{ frames.loading ? 'Refreshing...' : 'Refresh Frame' }}
+				</button>
+				<button class="control-btn secondary" :disabled="!frames.hasCurrentFrame" @click="handleDownloadFrame">
+					Download Frame
+				</button>
+				<button class="control-btn secondary" @click="frames.toggleAutoRefresh">
+					Auto: {{ frames.autoRefresh ? 'ON' : 'OFF' }}
+				</button>
+			</div>
+		</div>
+
+		<!-- Test Controls -->
+		<div class="test-section">
+			<div class="section-header">
+				<h3>Test Controls</h3>
+			</div>
+			<div class="test-controls">
+				<button class="test-btn" :disabled="led.loading" @click="handleTestConnectivity">
+					Test Connectivity
+				</button>
+				<button class="test-btn" :disabled="led.loading" @click="handleClearDisplay">Clear Display</button>
 			</div>
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-	import type { FrameData, FrameMetrics, FrameStats, LEDController } from '../types';
+	import { computed } from 'vue';
+	import { useFrames } from '../composables/useFrames';
+	import { useLED } from '../composables/useLED';
 
-	interface Props {
-		isRunning: boolean;
-		brightness: number;
-		currentMode: string;
-		loading: boolean;
-		currentFrame: FrameData | null;
-		frameImageUrl: string;
-		frameRate: number;
-		frameCount: number;
-		stats: FrameStats | null;
-		metrics: FrameMetrics;
-		controllerCount: number;
-		connectedControllers: LEDController[];
-		frameSize: number;
-		matrixSize: string;
-		isHealthy: boolean;
-		hasCurrentFrame: boolean;
-	}
+	// Composables
+	const led = useLED();
+	const frames = useFrames();
 
-	interface Emits {
-		(e: 'output-toggle'): void;
-		(e: 'brightness-change', brightness: number): void;
-		(e: 'mode-change', mode: string): void;
-		(e: 'test-pattern'): void;
-	}
+	// Computed properties
+	const currentFrameImageUrl = computed(() => {
+		if (frames.currentFrame) {
+			return frames.frameToImageUrl(frames.currentFrame);
+		}
+		return '';
+	});
 
-	defineProps<Props>();
-	const emit = defineEmits<Emits>();
-
-	const handleBrightnessChange = (event: Event): void => {
+	// LED Handlers
+	const handleBrightnessChange = async (event: Event): Promise<void> => {
 		const target = event.target as HTMLInputElement;
 		if (target) {
-			emit('brightness-change', Number(target.value));
+			try {
+				await led.setBrightness(Number(target.value));
+			} catch (error) {
+				console.error('Failed to change brightness:', error);
+			}
 		}
 	};
 
-	const handleModeChange = (event: Event): void => {
+	const handleModeChange = async (event: Event): Promise<void> => {
 		const target = event.target as HTMLSelectElement;
 		if (target) {
-			emit('mode-change', target.value);
+			try {
+				// Stop current output if running
+				if (led.isRunning) {
+					await led.stopOutput();
+				}
+				// Start with new mode
+				await led.startOutput(target.value as 'simulator' | 'production');
+			} catch (error) {
+				console.error('Failed to change mode:', error);
+			}
+		}
+	};
+
+	const handleOutputToggle = async (): Promise<void> => {
+		try {
+			if (led.isRunning) {
+				await led.stopOutput();
+			} else {
+				await led.startOutput(led.currentMode);
+			}
+		} catch (error) {
+			console.error('Failed to toggle output:', error);
+		}
+	};
+
+	const handleTestConnectivity = async (): Promise<void> => {
+		try {
+			await led.testConnectivity();
+		} catch (error) {
+			console.error('Failed to test connectivity:', error);
+		}
+	};
+
+	const handleClearDisplay = async (): Promise<void> => {
+		try {
+			await led.clearDisplay();
+		} catch (error) {
+			console.error('Failed to clear display:', error);
+		}
+	};
+
+	// Frame Handlers
+	const handleRefreshFrame = async (): Promise<void> => {
+		try {
+			await frames.refreshFrame();
+		} catch (error) {
+			console.error('Failed to refresh frame:', error);
+		}
+	};
+
+	const handleDownloadFrame = async (): Promise<void> => {
+		try {
+			await frames.downloadFrame();
+		} catch (error) {
+			console.error('Failed to download frame:', error);
 		}
 	};
 </script>
@@ -251,6 +329,20 @@
 		border-color: #c9d1d9;
 	}
 
+	.control-btn.secondary {
+		background: #161b22;
+		color: #7d8590;
+		border-color: #21262d;
+		min-width: auto;
+		padding: 0.5rem 1rem;
+		font-size: 0.875rem;
+	}
+
+	.control-btn.secondary:hover:not(:disabled) {
+		background: #21262d;
+		color: #c9d1d9;
+	}
+
 	.control-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
@@ -347,6 +439,7 @@
 		background: #161b22;
 		border: 1px solid #21262d;
 		border-radius: 4px;
+		margin-bottom: 1.5rem;
 	}
 
 	.status-item {
@@ -373,6 +466,88 @@
 		color: #c9d1d9;
 	}
 
+	/* Frame Controls Section */
+	.frame-controls-section {
+		margin-bottom: 1.5rem;
+	}
+
+	.section-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1rem;
+	}
+
+	.section-header h3 {
+		margin: 0;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #c9d1d9;
+	}
+
+	.health-indicator {
+		padding: 0.25rem 0.5rem;
+		border-radius: 3px;
+		font-size: 0.625rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.025em;
+	}
+
+	.health-indicator.healthy {
+		background: rgba(63, 185, 80, 0.1);
+		color: #3fb950;
+		border: 1px solid rgba(63, 185, 80, 0.3);
+	}
+
+	.health-indicator.warning {
+		background: rgba(210, 153, 34, 0.1);
+		color: #d29922;
+		border: 1px solid rgba(210, 153, 34, 0.3);
+	}
+
+	.health-indicator.critical {
+		background: rgba(248, 81, 73, 0.1);
+		color: #f85149;
+		border: 1px solid rgba(248, 81, 73, 0.3);
+	}
+
+	.frame-controls {
+		display: flex;
+		gap: 0.75rem;
+	}
+
+	.test-section {
+		margin-bottom: 0;
+	}
+
+	.test-controls {
+		display: flex;
+		gap: 0.75rem;
+	}
+
+	.test-btn {
+		padding: 0.5rem 1rem;
+		background: #21262d;
+		border: 1px solid #30363d;
+		border-radius: 4px;
+		color: #c9d1d9;
+		font-size: 0.875rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.test-btn:hover:not(:disabled) {
+		background: #30363d;
+		border-color: #c9d1d9;
+	}
+
+	.test-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
 	@media (max-width: 768px) {
 		.controls-section {
 			flex-direction: column;
@@ -394,6 +569,11 @@
 
 		.frame-container {
 			height: 150px;
+		}
+
+		.frame-controls,
+		.test-controls {
+			flex-direction: column;
 		}
 	}
 </style>

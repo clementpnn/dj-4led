@@ -1,18 +1,21 @@
 export interface LEDStats {
 	is_running: boolean;
+	mode: 'simulator' | 'production';
 	brightness: number;
 	frame_size: number;
 	matrix_size: string;
+	target_fps?: number;
+	frame_time_ms?: number;
 	controllers: number;
-	mode: 'simulator' | 'production';
 }
 
 export interface LEDController {
 	id: string;
-	address: string;
-	port: number;
+	name: string;
+	ip: string;
 	status: 'connected' | 'disconnected' | 'error';
-	lastSeen?: number;
+	type: 'hardware' | 'simulator';
+	lastSeen: number;
 }
 
 export interface LEDConfig {

@@ -1,26 +1,20 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, readonly, ref } from 'vue';
 import { DEFAULT_LED_CONFIG } from '../config';
 import type { LEDController, LEDStats } from '../types';
 
 export const useLEDStore = defineStore('led', () => {
 	// ===== STATE =====
-
 	const stats = ref<LEDStats | null>(null);
 	const controllers = ref<LEDController[]>([]);
 	const brightness = ref<number>(DEFAULT_LED_CONFIG.defaultBrightness);
 	const loading = ref(false);
 
 	// ===== GETTERS =====
-
 	const isRunning = computed(() => stats.value?.is_running || false);
-
 	const currentMode = computed(() => stats.value?.mode || 'simulator');
-
 	const frameSize = computed(() => stats.value?.frame_size || 0);
-
 	const matrixSize = computed(() => stats.value?.matrix_size || '128x128');
-
 	const controllerCount = computed(() => stats.value?.controllers || 0);
 
 	const connectedControllers = computed(() => controllers.value.filter((c) => c.status === 'connected'));
@@ -28,7 +22,6 @@ export const useLEDStore = defineStore('led', () => {
 	const isHealthy = computed(() => isRunning.value && brightness.value > 0 && connectedControllers.value.length > 0);
 
 	// ===== ACTIONS =====
-
 	const setStats = (newStats: LEDStats | null) => {
 		stats.value = newStats;
 		if (newStats) {
@@ -43,7 +36,7 @@ export const useLEDStore = defineStore('led', () => {
 	const updateController = (controllerId: string, updates: Partial<LEDController>) => {
 		const index = controllers.value.findIndex((c) => c.id === controllerId);
 		if (index !== -1) {
-			controllers.value[index] = { ...controllers.value[index], ...updates };
+			Object.assign(controllers.value[index], updates);
 		}
 	};
 
@@ -80,10 +73,10 @@ export const useLEDStore = defineStore('led', () => {
 
 	return {
 		// State
-		stats,
-		controllers,
-		brightness,
-		loading,
+		stats: readonly(stats),
+		controllers: readonly(controllers),
+		brightness: readonly(brightness),
+		loading: readonly(loading),
 
 		// Getters
 		isRunning,

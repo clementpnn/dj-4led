@@ -12,176 +12,151 @@ impl AudioCapture {
     where
         F: FnMut(&[f32]) + Send + 'static,
     {
-        println!("🔍 [CAPTURE] Init capture audio");
-
         let host = cpal::default_host();
 
-        // Chercher VB-Cable en priorité
-        let device = match Self::find_vb_cable_device(&host)? {
-            Some(vb_device) => {
-                println!("✅ [CAPTURE] VB-Cable trouvé");
-                vb_device
-            }
-            None => {
-                println!("⚠️ [CAPTURE] VB-Cable non trouvé, device par défaut");
-                host.default_input_device()
-                    .ok_or_else(|| anyhow::anyhow!("Aucun périphérique d'entrée par défaut"))?
-            }
-        };
-
+        // Sélectionner le meilleur device disponible
+        let device = Self::find_working_device(&host)?;
         let device_name = device.name().unwrap_or("Unknown".to_string());
-        println!("📱 [CAPTURE] Device: {}", device_name);
 
-        // Essayer d'obtenir la configuration par défaut du périphérique
-        let final_config = match device.default_input_config() {
-            Ok(default_config) => {
-                println!("🔧 [CAPTURE] Config: {}ch @ {}Hz",
-                         default_config.channels(), default_config.sample_rate().0);
-                default_config.into()
-            }
-            Err(_) => {
-                // Configuration de fallback
-                let fallback_config = StreamConfig {
-                    channels: 2,
-                    sample_rate: SampleRate(44100),
-                    buffer_size: cpal::BufferSize::Fixed(256),
-                };
+        // Obtenir la meilleure configuration
+        let config = Self::get_best_config(&device)?;
+        let channels = config.channels;
 
-                println!("🔧 [CAPTURE] Config fallback: 2ch @ 44100Hz");
-                fallback_config
-            }
-        };
-
-        let mut sample_counter = 0u64;
-        let mut last_log_time = std::time::Instant::now();
-        let channels = final_config.channels;
+        // Buffer pour accumuler les échantillons
+        let mut audio_buffer = Vec::with_capacity(4096);
 
         let stream = device.build_input_stream(
-            &final_config,
+            &config,
             move |data: &[f32], _: &_| {
-                sample_counter += data.len() as u64;
-
-                // Convertir stéréo en mono si nécessaire
-                let mono_data: Vec<f32> = if channels == 2 {
-                    data.chunks(2)
+                // Convertir en mono si nécessaire
+                let mono_data: Vec<f32> = if channels == 1 {
+                    data.to_vec()
+                } else {
+                    // Moyenne de tous les canaux
+                    data.chunks(channels as usize)
                         .map(|chunk| {
-                            if chunk.len() >= 2 {
-                                (chunk[0] + chunk[1]) / 2.0
-                            } else {
-                                chunk[0]
-                            }
+                            chunk.iter().sum::<f32>() / chunk.len() as f32
                         })
                         .collect()
-                } else {
-                    data.to_vec()
                 };
 
-                // Calculer le niveau audio
-                let max_level = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-                let avg_level = mono_data.iter().map(|&x| x.abs()).sum::<f32>() / mono_data.len() as f32;
+                // Ajouter au buffer d'accumulation
+                audio_buffer.extend_from_slice(&mono_data);
 
-                // Log périodique (toutes les 5 secondes)
-                if last_log_time.elapsed().as_secs() >= 5 {
-                    let signal_detected = if avg_level > 0.0001 || max_level > 0.001 {
-                        "🎵 SIGNAL"
-                    } else {
-                        "🔇 SILENCE"
-                    };
-                    println!(
-                        "{} [CAPTURE] Audio: {} samples/sec, max: {:.4}, avg: {:.4} | {} échantillons mono",
-                        signal_detected, sample_counter, max_level, avg_level, mono_data.len()
-                    );
-                    sample_counter = 0;
-                    last_log_time = std::time::Instant::now();
-                }
-
-                if avg_level > 0.0001 || max_level > 0.001 {
-                    let filtered_data: Vec<f32> = mono_data
-                        .iter()
-                        .map(|&x| {
-                            if x.abs() < 0.0005 {
-                                0.0
-                            } else {
-                                x
-                            }
-                        })
-                        .collect();
-
-                    callback(&filtered_data);
-                } else {
-                    let silence = vec![0.0; mono_data.len()];
-                    callback(&silence);
+                // Envoyer des chunks de 1024 échantillons pour FFT
+                while audio_buffer.len() >= 1024 {
+                    let chunk: Vec<f32> = audio_buffer.drain(0..1024).collect();
+                    callback(&chunk);
                 }
             },
             |err| {
                 eprintln!("❌ [CAPTURE] Stream error: {}", err);
             },
             None,
-        ).map_err(|e| anyhow::anyhow!("Impossible de créer le stream: {}", e))?;
+        ).map_err(|e| anyhow::anyhow!("Cannot create audio stream: {}", e))?;
 
-        stream.play().map_err(|e| anyhow::anyhow!("Impossible de démarrer le stream: {}", e))?;
-        println!("✅ [CAPTURE] Stream démarré sur: {}", device_name);
+        // Démarrer le stream
+        stream.play().map_err(|e| anyhow::anyhow!("Cannot start audio stream: {}", e))?;
+        println!("✅ [CAPTURE] Audio capture started on: {}", device_name);
 
         Ok(Self { stream })
     }
 
-    // Fonction pour trouver automatiquement VB-Cable
-    fn find_vb_cable_device(host: &cpal::Host) -> Result<Option<cpal::Device>> {
-        let devices = host.input_devices()?;
+    // Trouver un device audio qui fonctionne
+    fn find_working_device(host: &cpal::Host) -> Result<cpal::Device> {
+        // 1. Essayer le device par défaut
+        if let Some(default_device) = host.default_input_device() {
+            return Ok(default_device);
+        }
 
-        for device in devices {
-            if let Ok(name) = device.name() {
-                let name_lower = name.to_lowercase();
-                if name_lower.contains("vb-cable")
-                    || name_lower.contains("vb cable")
-                    || name_lower.contains("cable input")
-                    || name_lower.contains("virtual cable")
-                    || name_lower.contains("vb-audio")
-                    || name_lower.contains("voicemeeter") {
-                    return Ok(Some(device));
-                }
+        // 2. Prendre le premier device disponible
+        if let Ok(mut devices) = host.input_devices() {
+            if let Some(first_device) = devices.next() {
+                return Ok(first_device);
             }
         }
 
-        Ok(None)
+        Err(anyhow::anyhow!("No audio input device found"))
     }
 
-    #[allow(dead_code)]
-    pub fn run(&self) {
-        println!("🎧 [CAPTURE] Audio capture running...");
-        std::thread::park();
+    // Obtenir la meilleure configuration pour un device
+    fn get_best_config(device: &cpal::Device) -> Result<StreamConfig> {
+        // Essayer la config par défaut d'abord
+        if let Ok(default_config) = device.default_input_config() {
+            let mut config: StreamConfig = default_config.into();
+            // Optimiser le buffer pour FFT
+            config.buffer_size = cpal::BufferSize::Fixed(1024);
+            return Ok(config);
+        }
+
+        // Configurations de fallback
+        let fallback_configs = vec![
+            StreamConfig {
+                channels: 2,
+                sample_rate: SampleRate(44100),
+                buffer_size: cpal::BufferSize::Fixed(1024),
+            },
+            StreamConfig {
+                channels: 1,
+                sample_rate: SampleRate(44100),
+                buffer_size: cpal::BufferSize::Fixed(1024),
+            },
+            StreamConfig {
+                channels: 2,
+                sample_rate: SampleRate(48000),
+                buffer_size: cpal::BufferSize::Fixed(1024),
+            },
+            StreamConfig {
+                channels: 1,
+                sample_rate: SampleRate(22050),
+                buffer_size: cpal::BufferSize::Fixed(512),
+            },
+        ];
+
+        for config in fallback_configs {
+            if device.supported_input_configs().is_ok() {
+                return Ok(config);
+            }
+        }
+
+        Err(anyhow::anyhow!("Cannot find valid audio configuration"))
     }
 
-    // Fonction utilitaire pour lister tous les périphériques disponibles
+    // Diagnostic des périphériques disponibles
     pub fn list_devices() -> Result<()> {
         let host = cpal::default_host();
 
-        println!("🔍 [CAPTURE] Diagnostic audio:");
+        println!("🔍 [CAPTURE] Available audio devices:");
 
         // Périphériques d'entrée
-        println!("📥 [CAPTURE] Périphériques d'ENTRÉE:");
         match host.input_devices() {
             Ok(devices) => {
                 let devices: Vec<_> = devices.collect();
                 if devices.is_empty() {
-                    println!("   ❌ Aucun périphérique trouvé");
+                    println!("   ❌ No input devices found");
                 } else {
                     for (idx, device) in devices.iter().enumerate() {
                         let name = device.name().unwrap_or("Unknown".to_string());
                         println!("   {}. {}", idx, name);
+
+                        if let Ok(config) = device.default_input_config() {
+                            println!("      └─ {}ch @ {}Hz",
+                                     config.channels(),
+                                     config.sample_rate().0);
+                        }
                     }
                 }
             }
-            Err(e) => println!("   ❌ Erreur: {}", e),
+            Err(e) => println!("   ❌ Error: {}", e),
         }
 
         // Périphérique par défaut
-        println!("🎯 [CAPTURE] Device par défaut:");
         match host.default_input_device() {
             Some(device) => {
-                println!("   ✅ {}", device.name().unwrap_or("Unknown".to_string()));
+                let name = device.name().unwrap_or("Unknown".to_string());
+                println!("🎯 [CAPTURE] Default device: {}", name);
             }
-            None => println!("   ❌ Aucun device par défaut"),
+            None => println!("❌ [CAPTURE] No default device"),
         }
 
         Ok(())
