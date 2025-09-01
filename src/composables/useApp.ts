@@ -1,14 +1,15 @@
 // composables/useApp.ts
 import { computed, ref } from 'vue';
-import type { ActionResult } from '../types';
-import { useAudio } from './useAudio';
-import { useColors } from './useColors';
-import { useEffects } from './useEffects';
-import { useFrames } from './useFrames';
-import { useLED } from './useLED';
-import { useLogs } from './useLogs';
-import { usePresets } from './usePresets';
-import { useSystem } from './useSystem';
+
+import { useAudio } from '@/composables/useAudio';
+import { useColors } from '@/composables/useColors';
+import { useEffects } from '@/composables/useEffects';
+import { useFrames } from '@/composables/useFrames';
+import { useLED } from '@/composables/useLED';
+import { useLogs } from '@/composables/useLogs';
+import { usePresets } from '@/composables/usePresets';
+import { useSystem } from '@/composables/useSystem';
+import type { ActionResult } from '@/types';
 
 export const useApp = () => {
 	// Initialize all composables
@@ -171,7 +172,7 @@ export const useApp = () => {
 	};
 
 	// Save current as preset
-	const saveCurrentAsPreset = async (name: string, description: string = ''): Promise<ActionResult> => {
+	const saveCurrentAsPreset = async (name: string, description = ''): Promise<ActionResult> => {
 		try {
 			const composables = { audio, effects, colors, led };
 			const config = await presets.captureCurrentConfig(composables);

@@ -2,8 +2,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { onMounted, onUnmounted, ref } from 'vue';
-import { useSystemStore } from '../stores/system';
-import type { ActionResult, SystemConfig, SystemStats } from '../types';
+
+import { useSystemStore } from '@/stores/system';
+import type { ActionResult, SystemConfig, SystemStats } from '@/types';
 
 export function useSystem() {
 	// Store instance

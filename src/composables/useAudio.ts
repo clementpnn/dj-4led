@@ -2,8 +2,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { onMounted, onUnmounted } from 'vue';
-import { useAudioStore } from '../stores/audio';
-import type { ActionResult } from '../types';
+
+import { useAudioStore } from '@/stores/audio';
+import type { ActionResult } from '@/types';
 
 export function useAudio() {
 	// Store instance

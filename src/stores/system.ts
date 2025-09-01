@@ -1,7 +1,8 @@
 // stores/system.ts
 import { defineStore } from 'pinia';
 import { computed, readonly, ref } from 'vue';
-import type { SystemConfig, SystemHealth, SystemStats } from '../types';
+
+import type { SystemConfig, SystemHealth, SystemStats } from '@/types';
 
 export const useSystemStore = defineStore('system', () => {
 	// ===== STATE =====

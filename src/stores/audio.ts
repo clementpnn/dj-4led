@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
 import { computed, readonly, ref } from 'vue';
-import { DEFAULT_AUDIO_CONFIG } from '../config';
-import type { AudioState, AudioStats } from '../types';
+
+import { DEFAULT_AUDIO_CONFIG } from '@/config';
+import type { AudioState, AudioStats } from '@/types';
 
 export const useAudioStore = defineStore('audio', () => {
 	// ===== STATE =====

@@ -1,156 +1,140 @@
-// composables/useEffects.ts
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { onMounted, onUnmounted } from 'vue';
-import { useEffectsStore } from '../stores/effects';
-import type { ActionResult, Effect, EffectInfo, EffectState } from '../types';
+
+import { useEffectsStore } from '@/stores/effects';
+import type { ActionResult, EffectState } from '@/types';
 
 export function useEffects() {
-	// Store instance
-	const effectsStore = useEffectsStore();
+	const store = useEffectsStore();
 
-	// Event listeners references
 	let unlistenEffectChanged: UnlistenFn | null = null;
 	let unlistenEffectsReset: UnlistenFn | null = null;
 
-	// ===== EFFECTS LIST ACTIONS =====
-
+	// ===== API CALLS =====
 	const getEffectsList = async (): Promise<ActionResult> => {
-		effectsStore.setLoading(true);
-
+		store.setLoading(true);
 		try {
 			const result = await invoke<any>('effects_get_list');
 			const effects = result.effects || [];
-			effectsStore.setAvailableEffects(effects);
-
-			console.log(`🎇 Loaded ${effects.length} effects:`, result);
+			store.setAvailableEffects(effects);
+			console.log(`🎇 Loaded ${effects.length} effects`);
 			return {
 				success: true,
-				message: `Loaded ${effects.length} effects`,
+				message: `Successfully loaded ${effects.length} effects`,
 				data: effects,
 			};
 		} catch (err) {
-			const errorMessage = err instanceof Error ? err.message : String(err);
-			console.error('❌ Failed to get effects list:', errorMessage);
-			return { success: false, message: errorMessage };
+			console.error(`❌ Failed to get effects list: ${err}`);
+			return { success: false, message: String(err) };
 		} finally {
-			effectsStore.setLoading(false);
+			store.setLoading(false);
 		}
 	};
 
-	// ===== EFFECT SELECTION ACTIONS =====
-
 	const setEffect = async (effectId: number): Promise<ActionResult> => {
-		effectsStore.setLoading(true);
+		if (!store.validateEffectId(effectId)) {
+			return {
+				success: false,
+				message: `Invalid effect ID: ${effectId}. Valid range: 0-7`,
+			};
+		}
 
+		// Prevent multiple calls
+		if (store.loading) {
+			return {
+				success: false,
+				message: 'Effect change already in progress',
+			};
+		}
+
+		store.setLoading(true);
 		try {
-			// Start transition in store
-			const effect = effectsStore.getEffectById(effectId);
+			const effect = store.getEffectById(effectId);
 			if (effect) {
-				effectsStore.startTransition(effectId, effect.name);
+				store.startTransition(effectId, effect.name);
+				console.log(`🎇 Starting transition to: ${effect.name} (ID: ${effectId})`);
 			}
 
 			const result = await invoke<any>('effects_set_current', { effectId });
+			console.log(`✅ Effect changed to: ${result.name} (ID: ${result.id})`);
 
-			console.log(`🎇 Effect changed to ID ${effectId}:`, result);
 			return {
 				success: true,
 				message: result.message || `Effect changed to ${result.name}`,
 				data: result,
 			};
 		} catch (err) {
-			const errorMessage = err instanceof Error ? err.message : String(err);
-			console.error(`❌ Failed to set effect ${effectId}:`, errorMessage);
-			return { success: false, message: errorMessage };
+			console.error(`❌ Failed to set effect ${effectId}: ${err}`);
+			store.completeTransition();
+			return { success: false, message: String(err) };
 		} finally {
-			effectsStore.setLoading(false);
+			store.setLoading(false);
 		}
 	};
 
 	const setEffectByName = async (effectName: string): Promise<ActionResult> => {
-		effectsStore.setLoading(true);
-
-		try {
-			const result = await invoke<any>('effects_set_by_name', { effectName });
-
-			// Update store with result
-			if (result.id !== undefined) {
-				effectsStore.setCurrentEffect({
-					id: result.id,
-					name: result.name,
-					transitioning: false,
-					transition_progress: 1,
-				});
-			}
-
-			console.log(`🎇 Effect changed to "${effectName}":`, result);
+		const effect = store.getEffectByName(effectName);
+		if (!effect) {
+			const availableNames = store.availableEffects.map((e) => e.name).join(', ');
 			return {
-				success: true,
-				message: result.message || `Effect changed to ${effectName}`,
-				data: { id: result.id, name: result.name },
+				success: false,
+				message: `Effect "${effectName}" not found. Available: ${availableNames}`,
 			};
-		} catch (err) {
-			const errorMessage = err instanceof Error ? err.message : String(err);
-			console.error(`❌ Failed to set effect "${effectName}":`, errorMessage);
-			return { success: false, message: errorMessage };
-		} finally {
-			effectsStore.setLoading(false);
 		}
-	};
 
-	// ===== STATUS & INFO ACTIONS =====
+		return await setEffect(effect.id);
+	};
 
 	const getCurrentEffect = async (): Promise<ActionResult> => {
 		try {
 			const effect = await invoke<any>('effects_get_current');
-
 			const effectState: EffectState = {
 				id: effect.id,
 				name: effect.name,
 				transitioning: effect.transitioning || false,
 				transition_progress: effect.transition_progress || 1,
 			};
-
-			effectsStore.setCurrentEffect(effectState);
-
-			console.log('📊 Current effect:', effect);
+			store.setCurrentEffect(effectState);
+			console.log(`📊 Current effect: ${effect.name} (ID: ${effect.id})`);
 			return {
 				success: true,
-				message: 'Current effect retrieved',
+				message: 'Current effect retrieved successfully',
 				data: effect,
 			};
 		} catch (err) {
-			const errorMessage = err instanceof Error ? err.message : String(err);
-			console.warn('Failed to get current effect:', errorMessage);
-			return { success: false, message: errorMessage };
+			console.error(`❌ Failed to get current effect: ${err}`);
+			return { success: false, message: String(err) };
 		}
 	};
 
 	const getEffectInfo = async (effectId: number): Promise<ActionResult> => {
+		if (effectId < 0 || effectId > 7) {
+			return {
+				success: false,
+				message: `Invalid effect ID: ${effectId}. Valid range: 0-7`,
+			};
+		}
+
 		try {
 			const info = await invoke<any>('effects_get_info', { effectId });
-
-			const effectInfo: EffectInfo = {
+			store.setEffectInfo({
 				id: info.id,
 				name: info.name,
 				description: info.description,
 				performance_impact: info.performance_impact,
 				supports_transitions: info.supports_transitions || false,
 				supports_custom_colors: info.supports_custom_colors || false,
-			};
-
-			effectsStore.setEffectInfo(effectInfo);
-
-			console.log(`ℹ️ Effect info for ID ${effectId}:`, info);
+			});
+			console.log(`ℹ️ Effect info loaded: ${info.name}`);
 			return {
 				success: true,
-				message: 'Effect info retrieved',
+				message: `Effect info loaded for ${info.name}`,
 				data: info,
 			};
 		} catch (err) {
-			const errorMessage = err instanceof Error ? err.message : String(err);
-			console.warn(`Failed to get effect info for ${effectId}:`, errorMessage);
-			return { success: false, message: errorMessage };
+			console.error(`❌ Failed to get effect info: ${err}`);
+			return { success: false, message: String(err) };
 		}
 	};
 
@@ -160,138 +144,128 @@ export function useEffects() {
 
 			// Update store with stats
 			if (stats.current_effect) {
-				effectsStore.setCurrentEffect({
+				const effectState: EffectState = {
 					id: stats.current_effect.id,
 					name: stats.current_effect.name,
 					transitioning: stats.transition?.active || false,
 					transition_progress: stats.transition?.progress || 1,
-				});
+				};
+				store.setCurrentEffect(effectState);
 			}
 
-			console.log('📊 Effect stats:', stats);
+			console.log(`📊 Effect stats retrieved`);
 			return {
 				success: true,
-				message: 'Effect stats retrieved',
+				message: 'Effect stats retrieved successfully',
 				data: stats,
 			};
 		} catch (err) {
-			const errorMessage = err instanceof Error ? err.message : String(err);
-			console.warn('Failed to get effect stats:', errorMessage);
-			return { success: false, message: errorMessage };
+			console.error(`❌ Failed to get effect stats: ${err}`);
+			return { success: false, message: String(err) };
 		}
 	};
 
-	// ===== UTILITY ACTIONS =====
-
 	const resetAllEffects = async (): Promise<ActionResult> => {
-		effectsStore.setLoading(true);
-
+		store.setLoading(true);
 		try {
 			const result = await invoke<any>('effects_reset_all');
-
-			// Reset current effect in store
-			effectsStore.setCurrentEffect(null);
-
-			console.log('🔄 All effects reset:', result);
+			store.setCurrentEffect(null);
+			console.log(`🔄 All effects reset`);
 			return {
 				success: true,
-				message: result.message || 'All effects reset',
+				message: result.message || 'All effects reset successfully',
 				data: result,
 			};
 		} catch (err) {
-			const errorMessage = err instanceof Error ? err.message : String(err);
-			console.error('❌ Failed to reset effects:', errorMessage);
-			return { success: false, message: errorMessage };
+			console.error(`❌ Failed to reset effects: ${err}`);
+			return { success: false, message: String(err) };
 		} finally {
-			effectsStore.setLoading(false);
+			store.setLoading(false);
 		}
 	};
 
-	// ===== HELPER FUNCTIONS =====
-
-	const getEffectById = (id: number): Effect | undefined => {
-		return effectsStore.getEffectById(id);
-	};
-
-	const getEffectByName = (name: string): Effect | undefined => {
-		return effectsStore.availableEffects.find((effect) => effect.name === name);
-	};
-
 	// ===== EVENT HANDLERS =====
-
 	const handleEffectChanged = (event: any) => {
 		const data = event.payload;
+		console.log(`🎇 [EVENT] Effect changed:`, data);
 
-		const effectState: EffectState = {
-			id: data.id,
-			name: data.name,
-			transitioning: false,
-			transition_progress: 1,
-		};
-
-		effectsStore.setCurrentEffect(effectState);
-		effectsStore.completeTransition();
-
-		console.log('🎇 Effect changed event:', data);
+		if (data.id !== undefined && data.name) {
+			store.setCurrentEffect({
+				id: data.id,
+				name: data.name,
+				transitioning: false,
+				transition_progress: 1,
+			});
+			store.completeTransition();
+		}
 	};
 
-	const handleEffectsReset = () => {
-		console.log('🔄 Effects reset event received');
-		effectsStore.setCurrentEffect(null);
-		getCurrentEffect(); // Refresh current effect
+	const handleEffectsReset = (event: any) => {
+		console.log(`🔄 [EVENT] Effects reset:`, event.payload);
+		store.setCurrentEffect(null);
+		// Refresh current state from backend
+		getCurrentEffect().catch((err) => {
+			console.warn('Failed to refresh effect after reset:', err);
+		});
 	};
 
-	// ===== EVENT LISTENERS SETUP =====
-
+	// ===== LIFECYCLE =====
 	const setupListeners = async (): Promise<void> => {
 		try {
+			console.log(`🔧 Setting up effects event listeners...`);
 			unlistenEffectChanged = await listen('effect_changed', handleEffectChanged);
 			unlistenEffectsReset = await listen('effects_reset', handleEffectsReset);
-
-			console.log('✅ Effects event listeners setup complete');
+			console.log(`✅ Effects event listeners setup complete`);
 		} catch (err) {
-			console.error('❌ Failed to setup effects event listeners:', err);
+			console.error('❌ Failed to setup effects listeners:', err);
 		}
 	};
 
 	const cleanup = (): void => {
-		const listeners = [
-			{ fn: unlistenEffectChanged, name: 'effect_changed' },
-			{ fn: unlistenEffectsReset, name: 'effects_reset' },
-		];
-
-		listeners.forEach(({ fn, name }) => {
-			if (fn) {
-				try {
-					fn();
-					console.log(`✅ Cleaned up ${name} listener`);
-				} catch (err) {
-					console.warn(`❌ Error cleaning up ${name} listener:`, err);
-				}
-			}
-		});
-
+		console.log(`🧹 Cleaning up effects listeners...`);
+		unlistenEffectChanged?.();
+		unlistenEffectsReset?.();
 		unlistenEffectChanged = null;
 		unlistenEffectsReset = null;
 	};
 
-	// ===== INITIALIZATION =====
-
 	const initialize = async (): Promise<void> => {
 		console.log('🎇 Initializing effects composable...');
-
 		try {
 			await setupListeners();
-			await getEffectsList();
-			await getCurrentEffect();
 
-			console.log('✅ Effects composable initialized successfully');
+			// Get initial state from backend
+			const [effectsResult, currentResult] = await Promise.allSettled([getEffectsList(), getCurrentEffect()]);
+
+			if (effectsResult.status === 'fulfilled' && effectsResult.value.success) {
+				console.log('✅ Effects list initialized');
+			}
+			if (currentResult.status === 'fulfilled' && currentResult.value.success) {
+				console.log('✅ Current effect initialized');
+			}
+
+			console.log('✅ Effects composable initialized');
 		} catch (err) {
-			console.error('❌ Failed to initialize effects composable:', err);
+			console.error('❌ Failed to initialize effects:', err);
 		}
 	};
 
-	// ===== LIFECYCLE =====
+	// ===== UTILITIES =====
+	const syncWithBackend = async (): Promise<ActionResult> => {
+		console.log('🔄 Syncing effects with backend...');
+		try {
+			await Promise.all([getEffectsList(), getCurrentEffect()]);
+			return {
+				success: true,
+				message: 'Effects synchronized with backend successfully',
+			};
+		} catch (err) {
+			return {
+				success: false,
+				message: `Failed to sync: ${String(err)}`,
+			};
+		}
+	};
 
 	onMounted(() => {
 		console.log('🎇 Effects composable mounted');
@@ -303,13 +277,11 @@ export function useEffects() {
 		cleanup();
 	});
 
-	// ===== PUBLIC API =====
-
 	return {
-		// Store access
-		...effectsStore,
+		// Store
+		...store,
 
-		// Actions
+		// Methods
 		getEffectsList,
 		setEffect,
 		setEffectByName,
@@ -317,13 +289,7 @@ export function useEffects() {
 		getEffectInfo,
 		getEffectStats,
 		resetAllEffects,
-
-		// Helpers
-		getEffectById,
-		getEffectByName,
-
-		// Utilities
 		initialize,
-		cleanup,
+		syncWithBackend,
 	};
 }

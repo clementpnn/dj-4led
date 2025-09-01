@@ -3,11 +3,11 @@
 		<!-- Header avec status global -->
 		<Header
 			:is-connected="isConnected"
-			:fps="frames.stats.fps"
-			:is-streaming="audio.state.isCapturing && led.isRunning"
-			:stream-loading="system.loading"
-			:is-stream-healthy="system.isHealthy"
-			:loading="system.loading"
+			:fps="framesStore.stats.fps"
+			:is-streaming="audioStore.state.isCapturing && ledStore.isRunning"
+			:stream-loading="systemStore.loading"
+			:is-stream-healthy="systemStore.isHealthy"
+			:loading="systemStore.loading"
 			:ping-ms="pingMs"
 			@connect="handleQuickStart"
 			@disconnect="handleShutdown"
@@ -57,34 +57,34 @@
 				<!-- Panel de données (droite) -->
 				<aside class="data-sidebar">
 					<DataPanel
-						:spectrum-data="audio.state.spectrum"
-						:fps="frames.stats.fps"
-						:is-streaming="audio.state.isCapturing && led.isRunning"
+						:spectrum-data="audioStore.state.spectrum"
+						:fps="framesStore.stats.fps"
+						:is-streaming="audioStore.state.isCapturing && ledStore.isRunning"
 						:is-connected="isConnected"
 						:audio-data="{
-							isCapturing: audio.state.isCapturing,
-							gain: audio.state.currentGain,
-							deviceCount: audio.state.devices.length,
-							peak: audio.spectrumPeak,
-							rms: audio.spectrumRMS,
+							isCapturing: audioStore.state.isCapturing,
+							gain: audioStore.state.currentGain,
+							deviceCount: audioStore.state.devices.length,
+							peak: calculateSpectrumPeak(audioStore.state.spectrum),
+							rms: calculateSpectrumRMS(audioStore.state.spectrum),
 						}"
 						:led-data="{
-							isRunning: led.isRunning,
-							mode: led.currentMode,
-							brightness: led.brightness,
-							controllers: led.controllerCount,
-							frameSize: led.frameSize?.toString() || 'N/A',
+							isRunning: ledStore.isRunning,
+							mode: ledStore.currentMode,
+							brightness: ledStore.brightness,
+							controllers: ledStore.controllerCount,
+							frameSize: ledStore.frameSize?.toString() || 'N/A',
 						}"
 						:effects-data="{
-							current: effects.currentEffectName,
-							available: effects.availableEffects.length,
-							colorMode: colors.currentMode,
-							transitioning: effects.isTransitioning,
+							current: effectsStore.currentEffect?.name || 'none',
+							available: effectsStore.availableEffects.length,
+							colorMode: colorsStore.currentMode,
+							transitioning: effectsStore.currentEffect?.transitioning || false,
 						}"
 						:system-data="{
-							health: system.health.status,
-							healthScore: system.health.score,
-							monitoring: system.loading,
+							health: systemStore.health.status,
+							healthScore: systemStore.health.score,
+							monitoring: systemStore.loading,
 						}"
 					/>
 				</aside>
@@ -96,26 +96,29 @@
 <script setup lang="ts">
 	import { computed, onMounted, onUnmounted, ref } from 'vue';
 
-	// Composables
-	import { useAudio } from './composables/useAudio';
-	import { useColors } from './composables/useColors';
-	import { useEffects } from './composables/useEffects';
-	import { useFrames } from './composables/useFrames';
-	import { useLED } from './composables/useLED';
-	import { useLogs } from './composables/useLogs';
-	import { usePresets } from './composables/usePresets';
-	import { useSystem } from './composables/useSystem';
-
-	// Components
-	import AudioPanel from './components/AudioPanel.vue';
-	import ControlPanel from './components/ControlPanel.vue';
-	import DataPanel from './components/DataPanel.vue';
-	import Header from './components/Header.vue';
-	import LEDPanel from './components/LEDPanel.vue';
-	import Navigation from './components/Navigation.vue';
-	import PresetsPanel from './components/PresetsPanel.vue';
-	import SystemPanel from './components/SystemPanel.vue';
-	import Terminal from './components/Terminal.vue';
+	import AudioPanel from '@/components/AudioPanel.vue';
+	import ControlPanel from '@/components/ControlPanel.vue';
+	import DataPanel from '@/components/DataPanel.vue';
+	import Header from '@/components/Header.vue';
+	import LEDPanel from '@/components/LEDPanel.vue';
+	import Navigation from '@/components/Navigation.vue';
+	import PresetsPanel from '@/components/PresetsPanel.vue';
+	import SystemPanel from '@/components/SystemPanel.vue';
+	import Terminal from '@/components/Terminal.vue';
+	import { useAudio } from '@/composables/useAudio';
+	import { useColors } from '@/composables/useColors';
+	import { useEffects } from '@/composables/useEffects';
+	import { useFrames } from '@/composables/useFrames';
+	import { useLED } from '@/composables/useLED';
+	import { useLogs } from '@/composables/useLogs';
+	import { useSystem } from '@/composables/useSystem';
+	import { useAudioStore } from '@/stores/audio';
+	import { useColorsStore } from '@/stores/colors';
+	import { useEffectsStore } from '@/stores/effects';
+	import { useFramesStore } from '@/stores/frames';
+	import { useLEDStore } from '@/stores/led';
+	import { usePresetsStore } from '@/stores/presets';
+	import { useSystemStore } from '@/stores/system';
 
 	// State
 	const activeTab = ref('audio');
@@ -123,15 +126,35 @@
 	const connectionQuality = ref(100);
 	const pingMs = ref(0);
 
-	// Composables
-	const audio = useAudio();
-	const colors = useColors();
-	const effects = useEffects();
-	const frames = useFrames();
-	const led = useLED();
-	const logs = useLogs();
-	const presets = usePresets();
-	const system = useSystem();
+	// Stores - pour les données réactives
+	const audioStore = useAudioStore();
+	const colorsStore = useColorsStore();
+	const effectsStore = useEffectsStore();
+	const framesStore = useFramesStore();
+	const ledStore = useLEDStore();
+	const presetsStore = usePresetsStore();
+	const systemStore = useSystemStore();
+
+	// Composables - pour les actions uniquement
+	const audioComposable = useAudio();
+	const colorsComposable = useColors();
+	const effectsComposable = useEffects();
+	const framesComposable = useFrames();
+	const ledComposable = useLED();
+	const logsComposable = useLogs();
+	const systemComposable = useSystem();
+
+	// Helper functions pour les calculs audio
+	const calculateSpectrumPeak = (spectrum: readonly number[]): number => {
+		if (!spectrum || spectrum.length === 0) return 0;
+		return Math.max(...Array.from(spectrum));
+	};
+
+	const calculateSpectrumRMS = (spectrum: readonly number[]): number => {
+		if (!spectrum || spectrum.length === 0) return 0;
+		const sum = Array.from(spectrum).reduce((acc, val) => acc + val * val, 0);
+		return Math.sqrt(sum / spectrum.length);
+	};
 
 	// Configuration des onglets
 	const tabs = computed(() => [
@@ -160,55 +183,75 @@
 	// Handlers
 	const handleQuickStart = async (): Promise<void> => {
 		try {
-			logs.logInfo('Starting quick start sequence...', 'system');
+			if (logsComposable.logInfo) {
+				logsComposable.logInfo('Starting quick start sequence...', 'system');
+			}
 
 			// Simuler la connexion
 			isConnected.value = true;
 			connectionQuality.value = 100;
 
 			// Démarrer l'audio en premier
-			if (!audio.state.isCapturing) {
-				const audioResult = await audio.startCapture();
-				logs.logAction('Audio Start', audioResult, 'audio');
+			if (!audioStore.state.isCapturing && audioComposable.startCapture) {
+				const audioResult = await audioComposable.startCapture();
+				if (logsComposable.logAction) {
+					logsComposable.logAction('Audio Start', audioResult, 'audio');
+				}
 			}
 
 			// Démarrer LED
-			if (!led.isRunning) {
-				const ledResult = await led.startOutput();
-				logs.logAction('LED Start', ledResult, 'led');
+			if (!ledStore.isRunning && ledComposable.startOutput) {
+				const ledResult = await ledComposable.startOutput();
+				if (logsComposable.logAction) {
+					logsComposable.logAction('LED Start', ledResult, 'led');
+				}
 			}
 
-			logs.logSuccess('Quick start completed successfully', 'system');
+			if (logsComposable.logSuccess) {
+				logsComposable.logSuccess('Quick start completed successfully', 'system');
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Quick start failed';
-			logs.logError(`Quick start failed: ${message}`, 'system');
+			if (logsComposable.logError) {
+				logsComposable.logError(`Quick start failed: ${message}`, 'system');
+			}
 		}
 	};
 
 	const handleShutdown = async (): Promise<void> => {
 		try {
-			logs.logInfo('Shutting down system...', 'system');
+			if (logsComposable.logInfo) {
+				logsComposable.logInfo('Shutting down system...', 'system');
+			}
 
 			// Arrêter LED
-			if (led.isRunning) {
-				const ledResult = await led.stopOutput();
-				logs.logAction('LED Stop', ledResult, 'led');
+			if (ledStore.isRunning && ledComposable.stopOutput) {
+				const ledResult = await ledComposable.stopOutput();
+				if (logsComposable.logAction) {
+					logsComposable.logAction('LED Stop', ledResult, 'led');
+				}
 			}
 
 			// Arrêter audio
-			if (audio.state.isCapturing) {
-				const audioResult = await audio.stopCapture();
-				logs.logAction('Audio Stop', audioResult, 'audio');
+			if (audioStore.state.isCapturing && audioComposable.stopCapture) {
+				const audioResult = await audioComposable.stopCapture();
+				if (logsComposable.logAction) {
+					logsComposable.logAction('Audio Stop', audioResult, 'audio');
+				}
 			}
 
 			// Simuler la déconnexion
 			isConnected.value = false;
 			connectionQuality.value = 0;
 
-			logs.logSuccess('System shutdown completed', 'system');
+			if (logsComposable.logSuccess) {
+				logsComposable.logSuccess('System shutdown completed', 'system');
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Shutdown failed';
-			logs.logError(`Shutdown failed: ${message}`, 'system');
+			if (logsComposable.logError) {
+				logsComposable.logError(`Shutdown failed: ${message}`, 'system');
+			}
 		}
 	};
 
@@ -217,12 +260,14 @@
 			const startTime = Date.now();
 
 			// Vérifier le status de tous les composants
-			const results = await Promise.allSettled([
-				audio.getStatus(),
-				effects.getCurrentEffect(),
-				led.getStatus(),
-				frames.getCurrentFrame(),
-			]);
+			const healthPromises = [];
+
+			if (audioComposable.getStatus) healthPromises.push(audioComposable.getStatus());
+			if (effectsComposable.getCurrentEffect) healthPromises.push(effectsComposable.getCurrentEffect());
+			if (ledComposable.getStatus) healthPromises.push(ledComposable.getStatus());
+			if (framesComposable.getCurrentFrame) healthPromises.push(framesComposable.getCurrentFrame());
+
+			const results = await Promise.allSettled(healthPromises);
 
 			pingMs.value = Date.now() - startTime;
 
@@ -232,68 +277,105 @@
 					? `Health check passed (${pingMs.value}ms)`
 					: `Health check completed with ${failures} issues (${pingMs.value}ms)`;
 
-			logs.logAction('Health Check', { success: failures === 0, message }, 'system');
+			if (logsComposable.logAction) {
+				logsComposable.logAction('Health Check', { success: failures === 0, message }, 'system');
+			}
 		} catch (error) {
-			logs.logError('Health check failed', 'system');
+			if (logsComposable.logError) {
+				logsComposable.logError('Health check failed', 'system');
+			}
 			pingMs.value = 0;
 		}
 	};
 
 	const handleStreamToggle = async (): Promise<void> => {
-		const isCurrentlyStreaming = audio.state.isCapturing && led.isRunning;
+		const isCurrentlyStreaming = audioStore.state.isCapturing && ledStore.isRunning;
 
 		try {
 			if (isCurrentlyStreaming) {
-				logs.logInfo('Stopping audio-visual stream...', 'system');
+				if (logsComposable.logInfo) {
+					logsComposable.logInfo('Stopping audio-visual stream...', 'system');
+				}
 				await handleShutdown();
 			} else {
-				logs.logInfo('Starting audio-visual stream...', 'system');
+				if (logsComposable.logInfo) {
+					logsComposable.logInfo('Starting audio-visual stream...', 'system');
+				}
 				await handleQuickStart();
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Stream toggle failed';
-			logs.logError(`Stream toggle error: ${message}`, 'system');
+			if (logsComposable.logError) {
+				logsComposable.logError(`Stream toggle error: ${message}`, 'system');
+			}
 		}
 	};
 
 	// Lifecycle
 	onMounted(async () => {
-		logs.logInfo('🚀 DJ4LED Application started', 'system');
+		if (logsComposable.logInfo) {
+			logsComposable.logInfo('🚀 DJ4LED Application started', 'system');
+		}
 
 		try {
-			// Initialiser les composables
-			await Promise.all([
-				audio.initialize(),
-				effects.initialize(),
-				colors.initialize(),
-				led.initialize(),
-				frames.initialize(),
-				system.initialize(),
-			]);
+			// Initialiser les composables (seulement ceux qui ont une méthode initialize)
+			const initPromises = [];
 
-			// Les presets se chargent automatiquement via onMounted dans usePresets
-			logs.logInfo(`Presets ready: ${presets.presets.length} custom + defaults available`, 'system');
+			if (audioComposable.initialize) initPromises.push(audioComposable.initialize());
+			if (effectsComposable.initialize) initPromises.push(effectsComposable.initialize());
+			if (colorsComposable.initialize) initPromises.push(colorsComposable.initialize());
+			if (ledComposable.initialize) initPromises.push(ledComposable.initialize());
+			if (framesComposable.initialize) initPromises.push(framesComposable.initialize());
+			if (systemComposable.initialize) initPromises.push(systemComposable.initialize());
+
+			await Promise.allSettled(initPromises);
+
+			// Les presets - accès via le store
+			const presetsCount = presetsStore.presets?.length || 0;
+
+			if (logsComposable.logInfo) {
+				logsComposable.logInfo(`Presets ready: ${presetsCount} custom + defaults available`, 'system');
+			}
 
 			// Auto-switch vers system si problèmes critiques
-			if (system.health.status === 'critical') {
+			if (systemStore.health.status === 'critical') {
 				activeTab.value = 'system';
 			}
 
-			logs.logSuccess('Application initialized successfully', 'system');
+			if (logsComposable.logSuccess) {
+				logsComposable.logSuccess('Application initialized successfully', 'system');
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Initialization failed';
-			logs.logError(`Initialization failed: ${message}`, 'system');
+			if (logsComposable.logError) {
+				logsComposable.logError(`Initialization failed: ${message}`, 'system');
+			}
 			activeTab.value = 'system';
 		}
 	});
 
 	onUnmounted(() => {
-		logs.logInfo('👋 DJ4LED Application stopped', 'system');
+		if (logsComposable.logInfo) {
+			logsComposable.logInfo('👋 DJ4LED Application stopped', 'system');
+		}
 
-		// Cleanup des composables
-		[audio, effects, colors, led, frames, system].forEach((composable) => {
-			if (composable.cleanup) {
-				composable.cleanup();
+		// Cleanup des composables - seulement ceux qui ont la méthode cleanup
+		const composablesWithCleanup = [
+			{ composable: audioComposable, name: 'audio' },
+			{ composable: effectsComposable, name: 'effects' },
+			{ composable: colorsComposable, name: 'colors' },
+			{ composable: ledComposable, name: 'led' },
+			{ composable: framesComposable, name: 'frames' },
+			{ composable: systemComposable, name: 'system' },
+		];
+
+		composablesWithCleanup.forEach(({ composable, name }) => {
+			if (composable && 'cleanup' in composable && typeof composable.cleanup === 'function') {
+				try {
+					composable.cleanup();
+				} catch (error) {
+					console.warn(`Error during ${name} composable cleanup:`, error);
+				}
 			}
 		});
 	});

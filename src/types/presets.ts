@@ -1,4 +1,4 @@
-import { CustomColor } from './colors';
+import type { CustomColor } from '@/types/colors';
 
 export interface Preset {
 	id: string;

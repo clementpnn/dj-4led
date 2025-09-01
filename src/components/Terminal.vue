@@ -9,14 +9,14 @@
 				</div>
 			</div>
 			<div class="terminal-actions">
-				<button class="terminal-btn export" @click="handleExportLogs" title="Export logs">
+				<button class="terminal-btn export" title="Export logs" @click="handleExportLogs">
 					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 						<polyline points="7,10 12,15 17,10" />
 						<line x1="12" y1="15" x2="12" y2="3" />
 					</svg>
 				</button>
-				<button class="terminal-btn clear" @click="handleClearLogs" title="Clear all logs">
+				<button class="terminal-btn clear" title="Clear all logs" @click="handleClearLogs">
 					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path
 							d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"
@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-	import { useLogs } from '../composables/useLogs';
+	import { useLogs } from '@/composables/useLogs';
 
 	// Composable
 	const logs = useLogs();
@@ -208,7 +208,7 @@
 		overflow-y: auto;
 		font-size: 0.75rem;
 		line-height: 1.4;
-		background: linear-gradient(145deg, #0d1117 0%, #161b22 100%);
+		background: #0d1117;
 	}
 
 	.no-logs {

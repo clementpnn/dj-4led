@@ -1,4 +1,4 @@
-import type { ColorChannel, ColorMode, Effect, TestPattern } from '../types';
+import type { ColorChannel, ColorMode, Effect, TestPattern } from '@/types';
 
 export const EFFECTS: Effect[] = [
 	{
@@ -8,8 +8,6 @@ export const EFFECTS: Effect[] = [
 		emoji: '📊',
 		description: 'Classic spectrum analyzer bars',
 		category: 'spectrum',
-		supports_transitions: true,
-		performance_impact: 'low',
 	},
 	{
 		id: 1,
@@ -18,8 +16,6 @@ export const EFFECTS: Effect[] = [
 		emoji: '🌊',
 		description: 'Circular ripple effect from center',
 		category: 'ambient',
-		supports_transitions: true,
-		performance_impact: 'low',
 	},
 	{
 		id: 2,
@@ -28,8 +24,6 @@ export const EFFECTS: Effect[] = [
 		emoji: '✨',
 		description: 'Dynamic particle effects',
 		category: 'particle',
-		supports_transitions: false,
-		performance_impact: 'high',
 	},
 	{
 		id: 3,
@@ -38,8 +32,6 @@ export const EFFECTS: Effect[] = [
 		emoji: '💗',
 		description: 'Pulsing heartbeat effect',
 		category: 'rhythm',
-		supports_transitions: true,
-		performance_impact: 'low',
 	},
 	{
 		id: 4,
@@ -48,8 +40,6 @@ export const EFFECTS: Effect[] = [
 		emoji: '⭐',
 		description: 'Falling stars effect',
 		category: 'ambient',
-		supports_transitions: true,
-		performance_impact: 'medium',
 	},
 	{
 		id: 5,
@@ -58,8 +48,6 @@ export const EFFECTS: Effect[] = [
 		emoji: '🌧️',
 		description: 'Rain drops effect',
 		category: 'ambient',
-		supports_transitions: true,
-		performance_impact: 'medium',
 	},
 	{
 		id: 6,
@@ -68,8 +56,6 @@ export const EFFECTS: Effect[] = [
 		emoji: '🔥',
 		description: 'Fire simulation',
 		category: 'ambient',
-		supports_transitions: true,
-		performance_impact: 'high',
 	},
 	{
 		id: 7,
@@ -78,8 +64,6 @@ export const EFFECTS: Effect[] = [
 		emoji: '👏',
 		description: 'Applause meter with peak detection',
 		category: 'rhythm',
-		supports_transitions: true,
-		performance_impact: 'medium',
 	},
 ];
 

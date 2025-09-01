@@ -2,8 +2,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { onMounted, onUnmounted, ref } from 'vue';
-import { useLEDStore } from '../stores/led';
-import type { ActionResult, LEDController, LEDStats } from '../types';
+
+import { useLEDStore } from '@/stores/led';
+import type { ActionResult, LEDController, LEDStats } from '@/types';
 
 export function useLED() {
 	// Store instance
@@ -191,7 +192,7 @@ export function useLED() {
 
 	// ===== TEST FUNCTIONS =====
 
-	const sendTestPattern = async (pattern: string, durationMs: number = 3000): Promise<ActionResult> => {
+	const sendTestPattern = async (pattern: string, durationMs = 3000): Promise<ActionResult> => {
 		try {
 			const result = await invoke<any>('led_send_test_pattern', {
 				pattern,

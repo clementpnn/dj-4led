@@ -1,7 +1,10 @@
 // composables/usePresets.ts
-import { onMounted, readonly, ref } from 'vue';
-import { usePresetsStore } from '../stores/presets';
-import type { ActionResult, Preset, PresetConfig } from '../types';
+import { onMounted } from 'vue';
+
+import { useColorsStore } from '@/stores/colors';
+import { useEffectsStore } from '@/stores/effects';
+import { usePresetsStore } from '@/stores/presets';
+import type { ActionResult, Preset, PresetConfig } from '@/types';
 
 interface ComposableSet {
 	audio?: any;
@@ -11,11 +14,10 @@ interface ComposableSet {
 }
 
 export function usePresets() {
-	// Store instance
-	const presetsStore = usePresetsStore();
-
-	// Local state
-	const isApplying = ref(false);
+	// Store instances
+	const store = usePresetsStore();
+	const colorsStore = useColorsStore();
+	const effectsStore = useEffectsStore();
 
 	// ===== PRESET MANAGEMENT =====
 	const createPreset = async (
@@ -23,39 +25,53 @@ export function usePresets() {
 		description: string,
 		composables: ComposableSet
 	): Promise<ActionResult> => {
+		store.setLoading(true);
+
 		try {
-			if (!name || name.length < 2) {
+			// Validate name
+			const trimmedName = name.trim();
+			if (!trimmedName || trimmedName.length < 2) {
 				return { success: false, message: 'Name must be at least 2 characters' };
 			}
 
+			// Check if name exists using centralized store method
+			if (store.nameExists(trimmedName)) {
+				return { success: false, message: 'Preset name already exists' };
+			}
+
+			// Capture current configuration
 			const config = captureCurrentConfig(composables);
 
+			// Create preset object
 			const preset: Preset = {
 				id: `preset-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-				name: name.trim(),
+				name: trimmedName,
 				description: description.trim() || `Custom preset created on ${new Date().toLocaleDateString()}`,
 				config,
 				createdAt: Date.now(),
 				tags: ['custom'],
 			};
 
-			const success = presetsStore.addPreset(preset);
+			const success = store.addPreset(preset);
+
 			if (success) {
 				return { success: true, message: 'Preset created successfully', data: preset };
 			} else {
-				return { success: false, message: 'Preset name already exists' };
+				return { success: false, message: 'Failed to save preset' };
 			}
 		} catch (err) {
 			const errorMessage = err instanceof Error ? err.message : 'Failed to create preset';
 			return { success: false, message: errorMessage };
+		} finally {
+			store.setLoading(false);
 		}
 	};
 
 	const applyPreset = async (presetId: string, composables: ComposableSet): Promise<ActionResult> => {
-		isApplying.value = true;
+		store.setApplying(true);
 
 		try {
-			const preset = presetsStore.getPresetById(presetId);
+			const preset = store.getPresetById(presetId);
 			if (!preset) {
 				return { success: false, message: 'Preset not found' };
 			}
@@ -68,13 +84,33 @@ export function usePresets() {
 				applyLedSettings(composables.led, preset.config.led),
 			]);
 
-			presetsStore.setCurrentPreset(preset);
+			store.setCurrentPreset(preset);
 			return { success: true, message: `Preset "${preset.name}" applied successfully` };
 		} catch (err) {
 			const errorMessage = err instanceof Error ? err.message : 'Failed to apply preset';
 			return { success: false, message: errorMessage };
 		} finally {
-			isApplying.value = false;
+			store.setApplying(false);
+		}
+	};
+
+	const duplicatePreset = (presetId: string, newName: string): ActionResult => {
+		const result = store.duplicatePreset(presetId, newName);
+
+		if (result) {
+			return { success: true, message: 'Preset duplicated successfully', data: result };
+		} else {
+			return { success: false, message: 'Failed to duplicate preset' };
+		}
+	};
+
+	const deletePreset = (presetId: string): ActionResult => {
+		const result = store.deletePreset(presetId);
+
+		if (result) {
+			return { success: true, message: 'Preset deleted successfully' };
+		} else {
+			return { success: false, message: 'Failed to delete preset' };
 		}
 	};
 
@@ -85,18 +121,52 @@ export function usePresets() {
 		}
 	};
 
-	const applyEffectSettings = async (effects: any, config: any) => {
-		if (effects?.setEffect && config?.id !== undefined) {
-			await effects.setEffect(config.id);
+	const applyColorSettings = async (colors: any, config: any) => {
+		console.log('🌈 [PRESETS] Applying color settings:', config);
+
+		if (config?.mode) {
+			// Use store directly for more reliable updates
+			colorsStore.setCurrentMode(config.mode);
+
+			if (config.mode === 'custom' && config.customColor) {
+				colorsStore.setCustomColor(config.customColor);
+			}
+
+			// Also try composable method as fallback (but avoid loops)
+			if (colors?.setColorMode && !colors._applyingPreset) {
+				colors._applyingPreset = true;
+				try {
+					await colors.setColorMode(config.mode);
+					if (config.mode === 'custom' && config.customColor && colors.setCustomColor) {
+						await colors.setCustomColor(config.customColor);
+					}
+				} finally {
+					colors._applyingPreset = false;
+				}
+			}
 		}
 	};
 
-	const applyColorSettings = async (colors: any, config: any) => {
-		if (colors?.setColorMode && config?.mode) {
-			await colors.setColorMode(config.mode);
+	const applyEffectSettings = async (effects: any, config: any) => {
+		console.log('🎇 [PRESETS] Applying effect settings:', config);
 
-			if (config.mode === 'custom' && config.customColor && colors.setCustomColor) {
-				await colors.setCustomColor(config.customColor);
+		if (config?.id !== undefined) {
+			// Use store directly for more reliable updates
+			effectsStore.setCurrentEffect({
+				id: config.id,
+				name: config.name || 'SpectrumBars',
+				transitioning: false,
+				transition_progress: 1,
+			});
+
+			// Also try composable method as fallback (but avoid loops)
+			if (effects?.setEffect && !effects._applyingPreset) {
+				effects._applyingPreset = true;
+				try {
+					await effects.setEffect(config.id);
+				} finally {
+					effects._applyingPreset = false;
+				}
 			}
 		}
 	};
@@ -108,6 +178,8 @@ export function usePresets() {
 	};
 
 	const captureCurrentConfig = (composables: ComposableSet): PresetConfig => {
+		console.log('📸 [PRESETS] Capturing current configuration...');
+
 		const config: PresetConfig = {
 			effect: { id: 0, name: 'SpectrumBars' },
 			color: { mode: 'rainbow' },
@@ -116,47 +188,64 @@ export function usePresets() {
 		};
 
 		try {
-			// Capture audio
-			if (composables.audio?.state?.currentGain !== undefined) {
-				config.audio.gain = composables.audio.state.currentGain;
+			// Capture effect from effects store
+			if (effectsStore.currentEffect) {
+				config.effect = {
+					id: effectsStore.currentEffect.id,
+					name: effectsStore.currentEffect.name,
+				};
+				console.log('🎇 [PRESETS] Captured effect:', config.effect);
 			}
 
-			// Capture effect
-			if (composables.effects?.currentEffect) {
-				config.effect = {
-					id: composables.effects.currentEffect.id || 0,
-					name: composables.effects.currentEffect.name || 'SpectrumBars',
+			// Capture color from colors store
+			config.color = {
+				mode: colorsStore.currentMode,
+			};
+
+			// If custom mode, capture the custom color
+			if (colorsStore.currentMode === 'custom') {
+				config.color.customColor = {
+					r: colorsStore.customColor.r,
+					g: colorsStore.customColor.g,
+					b: colorsStore.customColor.b,
 				};
 			}
+			console.log('🌈 [PRESETS] Captured color:', config.color);
 
-			// Capture color
-			if (composables.colors?.currentMode) {
-				config.color.mode = composables.colors.currentMode;
-				if (composables.colors.currentMode === 'custom' && composables.colors.customColor) {
-					config.color.customColor = composables.colors.customColor;
-				}
+			// Capture audio from composable (fallback)
+			if (composables.audio?.state?.currentGain !== undefined) {
+				config.audio.gain = composables.audio.state.currentGain;
+			} else if (composables.audio?.currentGain !== undefined) {
+				config.audio.gain = composables.audio.currentGain;
 			}
+			console.log('🔊 [PRESETS] Captured audio:', config.audio);
 
-			// Capture LED
+			// Capture LED from composable (fallback)
 			if (composables.led?.brightness !== undefined) {
 				config.led.brightness = composables.led.brightness;
 			}
 			if (composables.led?.currentMode) {
 				config.led.mode = composables.led.currentMode;
 			}
+			console.log('💡 [PRESETS] Captured LED:', config.led);
 		} catch (err) {
-			console.warn('Some settings could not be captured, using defaults');
+			console.warn('⚠️ [PRESETS] Some settings could not be captured, using defaults:', err);
 		}
 
+		console.log('✅ [PRESETS] Final captured config:', config);
 		return config;
 	};
 
 	// ===== EXPORT/IMPORT =====
 	const exportPresets = (): ActionResult => {
-		try {
-			const data = presetsStore.exportPresets(false);
+		const result = store.exportPresets(false);
 
-			const blob = new Blob([data], { type: 'application/json' });
+		if (!result.success || !result.data) {
+			return { success: false, message: result.message };
+		}
+
+		try {
+			const blob = new Blob([result.data], { type: 'application/json' });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
@@ -166,9 +255,9 @@ export function usePresets() {
 			document.body.removeChild(a);
 			URL.revokeObjectURL(url);
 
-			return { success: true, message: `${presetsStore.presets.length} presets exported` };
+			return { success: true, message: result.message };
 		} catch (err) {
-			return { success: false, message: 'Failed to export presets' };
+			return { success: false, message: 'Failed to download export file' };
 		}
 	};
 
@@ -179,13 +268,17 @@ export function usePresets() {
 			reader.onload = (e) => {
 				try {
 					const data = e.target?.result as string;
-					const result = presetsStore.importPresets(data);
+					const result = store.importPresets(data);
 
-					resolve({
-						success: true,
-						message: `${result.imported} presets imported${result.skipped > 0 ? `, ${result.skipped} skipped` : ''}`,
-						data: result,
-					});
+					if (result.success) {
+						resolve({
+							success: true,
+							message: result.message,
+							data: { imported: result.imported, skipped: result.skipped },
+						});
+					} else {
+						resolve({ success: false, message: result.message });
+					}
 				} catch (err) {
 					resolve({ success: false, message: 'Failed to import presets' });
 				}
@@ -198,31 +291,19 @@ export function usePresets() {
 
 	// ===== LIFECYCLE =====
 	onMounted(() => {
-		presetsStore.loadFromStorage();
+		store.loadFromStorage();
 	});
 
-	// ===== PUBLIC API =====
+	// ===== PUBLIC API - Return only methods, not store data =====
 	return {
-		// Store access
-		presets: presetsStore.presets,
-		allPresets: presetsStore.allPresets,
-		currentPreset: presetsStore.currentPreset,
-		loading: presetsStore.loading,
-		availableTags: presetsStore.availableTags,
-
-		// Local state
-		isApplying: readonly(isApplying),
-
-		// Actions
+		// Actions only - no store data
 		createPreset,
 		applyPreset,
-		deletePreset: presetsStore.deletePreset,
-		duplicatePreset: presetsStore.duplicatePreset,
+		deletePreset,
+		duplicatePreset,
 
 		// Utils
 		exportPresets,
 		importPresets,
-		getPresetById: presetsStore.getPresetById,
-		clearLogs: presetsStore.clearLogs,
 	};
 }

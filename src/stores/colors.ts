@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
-import { computed, readonly, ref } from 'vue';
-import { COLOR_MODES, DEFAULT_CUSTOM_COLOR } from '../config';
-import type { ColorConfig, ColorMode, CustomColor } from '../types';
+import { computed, ref, watch } from 'vue';
+
+import { COLOR_MODES, DEFAULT_CUSTOM_COLOR } from '@/config';
+import type { ColorConfig, ColorMode, CustomColor } from '@/types';
 
 export const useColorsStore = defineStore('colors', () => {
 	// ===== STATE =====
@@ -10,10 +11,23 @@ export const useColorsStore = defineStore('colors', () => {
 	const availableModes = ref<ColorMode[]>([...COLOR_MODES]);
 	const loading = ref(false);
 
+	// Force reactivity with watchers
+	watch(currentMode, (newMode) => {
+		console.log(`🌈 [COLORS_STORE] Mode changed to: ${newMode}`);
+	});
+
+	watch(
+		customColor,
+		(newColor) => {
+			console.log(`🎨 [COLORS_STORE] Custom color changed:`, newColor);
+		},
+		{ deep: true }
+	);
+
 	// ===== GETTERS =====
 	const colorPreviewStyle = computed(() => {
 		const { r, g, b } = customColor.value;
-		const rgb = [r, g, b].map((v) => Math.round(v * 255));
+		const rgb = [r, g, b].map((v) => Math.round(Math.max(0, Math.min(255, v * 255))));
 		return {
 			backgroundColor: `rgb(${rgb.join(', ')})`,
 		};
@@ -22,7 +36,7 @@ export const useColorsStore = defineStore('colors', () => {
 	const hexColor = computed(() => {
 		const { r, g, b } = customColor.value;
 		const hex = [r, g, b]
-			.map((v) => Math.round(v * 255))
+			.map((v) => Math.round(Math.max(0, Math.min(255, v * 255))))
 			.map((v) => v.toString(16).padStart(2, '0'))
 			.join('');
 		return `#${hex}`.toUpperCase();
@@ -34,44 +48,77 @@ export const useColorsStore = defineStore('colors', () => {
 
 	// ===== ACTIONS =====
 	const setCurrentMode = (mode: string) => {
-		if (availableModes.value.some((m) => m.value === mode)) {
-			currentMode.value = mode;
-		}
+		console.log(`🌈 [COLORS_STORE] Setting mode: ${currentMode.value} → ${mode}`);
+		currentMode.value = mode;
 	};
 
 	const setCustomColor = (color: CustomColor) => {
-		// Clamp values between 0 and 1
-		customColor.value = {
-			r: Math.max(0, Math.min(1, color.r)),
-			g: Math.max(0, Math.min(1, color.g)),
-			b: Math.max(0, Math.min(1, color.b)),
+		const validColor = {
+			r: Math.max(0, Math.min(1, color.r || 0)),
+			g: Math.max(0, Math.min(1, color.g || 0)),
+			b: Math.max(0, Math.min(1, color.b || 0)),
 		};
-	};
 
-	const setAvailableModes = (modes: ColorMode[]) => {
-		availableModes.value = modes;
+		console.log(`🎨 [COLORS_STORE] Setting color:`, {
+			from: customColor.value,
+			to: validColor,
+		});
+
+		customColor.value = validColor;
 	};
 
 	const setLoading = (isLoading: boolean) => {
+		console.log(`⏳ [COLORS_STORE] Loading: ${loading.value} → ${isLoading}`);
 		loading.value = isLoading;
 	};
 
 	const updateColorConfig = (config: ColorConfig) => {
-		currentMode.value = config.mode;
-		if (config.custom_color) {
-			customColor.value = { ...config.custom_color };
+		console.log(`🔄 [COLORS_STORE] Updating config:`, config);
+
+		if (config.mode && config.mode !== currentMode.value) {
+			setCurrentMode(config.mode);
 		}
-		if (config.available_modes) {
-			// Merge with existing modes, keeping emojis and descriptions
+
+		if (config.custom_color) {
+			setCustomColor(config.custom_color);
+		}
+
+		if (config.available_modes && Array.isArray(config.available_modes)) {
 			const updatedModes = config.available_modes.map((mode) => {
-				const existing = availableModes.value.find((m) => m.value === mode);
-				return existing || { value: mode, label: mode, emoji: '🎨' };
+				const existing = COLOR_MODES.find((m) => m.value === mode);
+				return (
+					existing || {
+						value: mode,
+						label: mode.charAt(0).toUpperCase() + mode.slice(1),
+						emoji: '🎨',
+					}
+				);
 			});
 			availableModes.value = updatedModes;
 		}
 	};
 
-	const reset = () => {
+	const validateMode = (mode: string): boolean => {
+		return availableModes.value.some((m) => m.value === mode);
+	};
+
+	const validateColor = (color: CustomColor): CustomColor => {
+		return {
+			r: Math.max(0, Math.min(1, color.r || 0)),
+			g: Math.max(0, Math.min(1, color.g || 0)),
+			b: Math.max(0, Math.min(1, color.b || 0)),
+		};
+	};
+
+	// Force trigger reactivity
+	const forceUpdate = () => {
+		const current = { ...customColor.value };
+		customColor.value = { ...current };
+	};
+
+	// Pinia $reset method
+	const $reset = () => {
+		console.log('🔄 [COLORS_STORE] Resetting store');
 		currentMode.value = 'rainbow';
 		customColor.value = { ...DEFAULT_CUSTOM_COLOR };
 		availableModes.value = [...COLOR_MODES];
@@ -80,10 +127,10 @@ export const useColorsStore = defineStore('colors', () => {
 
 	return {
 		// State
-		currentMode: readonly(currentMode),
-		customColor: readonly(customColor),
-		availableModes: readonly(availableModes),
-		loading: readonly(loading),
+		currentMode,
+		customColor,
+		availableModes,
+		loading,
 
 		// Getters
 		colorPreviewStyle,
@@ -94,9 +141,11 @@ export const useColorsStore = defineStore('colors', () => {
 		// Actions
 		setCurrentMode,
 		setCustomColor,
-		setAvailableModes,
 		setLoading,
 		updateColorConfig,
-		reset,
+		validateMode,
+		validateColor,
+		forceUpdate,
+		$reset,
 	};
 });

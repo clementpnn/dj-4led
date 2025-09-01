@@ -1,8 +1,9 @@
 // stores/logs.ts
 import { defineStore } from 'pinia';
 import { computed, readonly, ref } from 'vue';
-import { APP_CONFIG } from '../config';
-import type { LogEntry, LogFilter, LogStats } from '../types';
+
+import { APP_CONFIG } from '@/config';
+import type { LogEntry, LogFilter, LogStats } from '@/types';
 
 export const useLogsStore = defineStore('logs', () => {
 	// ===== STATE =====
@@ -137,7 +138,7 @@ export const useLogsStore = defineStore('logs', () => {
 		}
 	};
 
-	const exportLogs = (filtered: boolean = false): string => {
+	const exportLogs = (filtered = false): string => {
 		const logsToExport = filtered ? filteredLogs.value : logs.value;
 		return JSON.stringify(
 			{

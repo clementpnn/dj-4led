@@ -1,7 +1,8 @@
 // composables/useLogs.ts
 import { computed, nextTick, onMounted, ref } from 'vue';
-import { useLogsStore } from '../stores/logs';
-import type { ActionResult, LogEntry } from '../types';
+
+import { useLogsStore } from '@/stores/logs';
+import type { ActionResult, LogEntry } from '@/types';
 
 export function useLogs() {
 	// Store instance

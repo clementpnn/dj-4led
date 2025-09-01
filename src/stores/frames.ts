@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
 import { computed, readonly, ref } from 'vue';
-import { APP_CONFIG } from '../config';
-import type { FrameData, FrameMetrics, FrameStats } from '../types';
+
+import { APP_CONFIG } from '@/config';
+import type { FrameData, FrameMetrics, FrameStats } from '@/types';
 
 export const useFramesStore = defineStore('frames', () => {
 	// ===== STATE =====

@@ -1,13 +1,15 @@
 // stores/presets.ts
 import { defineStore } from 'pinia';
-import { computed, readonly, ref } from 'vue';
-import type { Preset } from '../types';
+import { computed, ref } from 'vue';
+
+import type { Preset } from '@/types';
 
 export const usePresetsStore = defineStore('presets', () => {
 	// ===== STATE =====
 	const presets = ref<Preset[]>([]);
 	const currentPreset = ref<Preset | null>(null);
 	const loading = ref(false);
+	const isApplying = ref(false);
 
 	// Default presets
 	const defaultPresets: Preset[] = [
@@ -66,7 +68,10 @@ export const usePresetsStore = defineStore('presets', () => {
 	];
 
 	// ===== GETTERS =====
-	const allPresets = computed(() => [...defaultPresets, ...presets.value]);
+	const allPresets = computed(() => {
+		const combined = [...defaultPresets, ...presets.value];
+		return combined;
+	});
 
 	const availableTags = computed(() => {
 		const tags = new Set<string>();
@@ -76,38 +81,67 @@ export const usePresetsStore = defineStore('presets', () => {
 		return Array.from(tags).sort();
 	});
 
+	// Helper function to check if a name exists (centralized logic)
+	const nameExists = (name: string): boolean => {
+		const normalizedName = name.toLowerCase().trim();
+		return allPresets.value.some((p) => p.name.toLowerCase().trim() === normalizedName);
+	};
+
 	// ===== ACTIONS =====
-	const addPreset = (preset: Preset) => {
-		// Check for duplicate names
-		const exists = allPresets.value.some((p) => p.name.toLowerCase() === preset.name.toLowerCase());
-		if (exists) {
-			console.warn('Preset name already exists');
+	const setLoading = (value: boolean) => {
+		loading.value = value;
+	};
+
+	const setApplying = (value: boolean) => {
+		isApplying.value = value;
+	};
+
+	const addPreset = (preset: Preset): boolean => {
+		if (nameExists(preset.name)) {
+			console.warn('❌ [PRESETS_STORE] Preset name already exists:', preset.name);
 			return false;
 		}
 
-		presets.value.push(preset);
+		// Add to custom presets array and force reactivity update
+		const newPreset = { ...preset };
+		presets.value.push(newPreset);
+
+		// Force Vue reactivity trigger
+		presets.value = [...presets.value];
+
+		// Save to localStorage
 		saveToStorage();
+		console.log('✅ [PRESETS_STORE] Preset added and saved successfully');
 		return true;
 	};
 
-	const deletePreset = (id: string) => {
+	const deletePreset = (id: string): boolean => {
+		console.log(`🗑️ [PRESETS_STORE] Attempting to delete preset: ${id}`);
+
 		// Prevent deletion of default presets
-		if (defaultPresets.some((p) => p.id === id)) {
-			console.warn('Cannot delete default preset');
+		const isDefault = defaultPresets.some((p) => p.id === id);
+		if (isDefault) {
+			console.warn('❌ [PRESETS_STORE] Cannot delete default preset:', id);
 			return false;
 		}
 
 		const index = presets.value.findIndex((p) => p.id === id);
+
 		if (index !== -1) {
+			const deletedPreset = presets.value[index];
 			presets.value.splice(index, 1);
 
 			if (currentPreset.value?.id === id) {
+				console.log('🔄 [PRESETS_STORE] Clearing current preset as it was deleted');
 				currentPreset.value = null;
 			}
 
 			saveToStorage();
+			console.log('✅ [PRESETS_STORE] Preset deleted successfully:', deletedPreset.name);
 			return true;
 		}
+
+		console.warn('❌ [PRESETS_STORE] Preset not found in custom presets:', id);
 		return false;
 	};
 
@@ -115,46 +149,80 @@ export const usePresetsStore = defineStore('presets', () => {
 		currentPreset.value = preset;
 	};
 
-	const duplicatePreset = (id: string, newName: string) => {
-		const original = allPresets.value.find((p) => p.id === id);
-		if (!original) {
-			console.warn('Preset not found');
+	const duplicatePreset = (id: string, newName: string): Preset | null => {
+		console.log(`🔄 [PRESETS_STORE] Duplicating preset: ${id} → ${newName}`);
+
+		// Validate new name before proceeding
+		if (nameExists(newName)) {
 			return null;
 		}
 
+		const original = allPresets.value.find((p) => p.id === id);
+		if (!original) {
+			console.warn('❌ [PRESETS_STORE] Preset not found for duplication:', id);
+			return null;
+		}
+
+		// Create deep copy to avoid reference issues
 		const duplicate: Preset = {
 			...original,
 			id: `preset-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
 			name: newName,
-			description: `Copy of ${original.description}`,
+			description: original.description ? `Copy of ${original.description}` : `Copy of ${original.name}`,
 			createdAt: Date.now(),
 			updatedAt: undefined,
+			config: {
+				...original.config,
+				effect: { ...original.config.effect },
+				color: {
+					...original.config.color,
+					...(original.config.color.customColor && {
+						customColor: { ...original.config.color.customColor },
+					}),
+				},
+				audio: { ...original.config.audio },
+				led: { ...original.config.led },
+			},
 		};
 
 		const success = addPreset(duplicate);
-		return success ? duplicate : null;
+		if (success) {
+			console.log('✅ [PRESETS_STORE] Preset duplicated successfully:', duplicate);
+			return duplicate;
+		} else {
+			console.warn('❌ [PRESETS_STORE] Failed to add duplicated preset');
+			return null;
+		}
 	};
 
 	const getPresetById = (id: string): Preset | undefined => {
 		return allPresets.value.find((p) => p.id === id);
 	};
 
-	const exportPresets = (includeDefaults = false): string => {
-		const presetsToExport = includeDefaults ? allPresets.value : presets.value;
+	const exportPresets = (includeDefaults = false): { success: boolean; message: string; data?: string } => {
+		try {
+			const presetsToExport = includeDefaults ? allPresets.value : presets.value;
 
-		return JSON.stringify(
-			{
-				version: '1.0',
-				exported_at: new Date().toISOString(),
-				total_presets: presetsToExport.length,
-				presets: presetsToExport,
-			},
-			null,
-			2
-		);
+			const data = JSON.stringify(
+				{
+					version: '1.0',
+					exported_at: new Date().toISOString(),
+					total_presets: presetsToExport.length,
+					presets: presetsToExport,
+				},
+				null,
+				2
+			);
+
+			return { success: true, message: `${presetsToExport.length} presets exported`, data };
+		} catch (error) {
+			return { success: false, message: 'Failed to export presets' };
+		}
 	};
 
-	const importPresets = (data: string): { imported: number; skipped: number } => {
+	const importPresets = (
+		data: string
+	): { success: boolean; message: string; imported?: number; skipped?: number } => {
 		try {
 			const importData = JSON.parse(data);
 
@@ -172,10 +240,8 @@ export const usePresetsStore = defineStore('presets', () => {
 					return;
 				}
 
-				// Check for duplicate names
-				const exists = allPresets.value.some((p) => p.name.toLowerCase() === presetData.name.toLowerCase());
-
-				if (exists) {
+				// Check for duplicate names using centralized function
+				if (nameExists(presetData.name)) {
 					skipped++;
 					return;
 				}
@@ -196,16 +262,22 @@ export const usePresetsStore = defineStore('presets', () => {
 				saveToStorage();
 			}
 
-			return { imported, skipped };
+			return {
+				success: true,
+				message: `${imported} presets imported${skipped > 0 ? `, ${skipped} skipped` : ''}`,
+				imported,
+				skipped,
+			};
 		} catch (error) {
-			throw new Error('Failed to parse preset data');
+			return { success: false, message: 'Failed to parse preset data' };
 		}
 	};
 
 	// ===== STORAGE =====
 	const saveToStorage = () => {
 		try {
-			localStorage.setItem('dj4led-presets', JSON.stringify(presets.value));
+			const dataToSave = JSON.stringify(presets.value, null, 2);
+			localStorage.setItem('dj4led-presets', dataToSave);
 		} catch (error) {
 			console.warn('Failed to save presets to storage:', error);
 		}
@@ -218,17 +290,22 @@ export const usePresetsStore = defineStore('presets', () => {
 				const data = JSON.parse(stored);
 				if (Array.isArray(data)) {
 					presets.value = data;
+				} else {
+					presets.value = [];
 				}
+			} else {
+				presets.value = [];
 			}
 		} catch (error) {
-			console.warn('Failed to load presets from storage:', error);
+			presets.value = [];
 		}
 	};
 
-	const clearLogs = () => {
+	const clearPresets = () => {
 		presets.value.splice(0, presets.value.length);
 		currentPreset.value = null;
 		loading.value = false;
+		isApplying.value = false;
 
 		try {
 			localStorage.removeItem('dj4led-presets');
@@ -237,17 +314,27 @@ export const usePresetsStore = defineStore('presets', () => {
 		}
 	};
 
+	const isDefaultPreset = (presetId: string): boolean => {
+		return defaultPresets.some((p) => p.id === presetId);
+	};
+
 	return {
-		// State
-		presets: readonly(presets),
-		currentPreset: readonly(currentPreset),
-		loading: readonly(loading),
+		// State (reactive)
+		presets,
+		currentPreset,
+		loading,
+		isApplying,
 
 		// Getters
 		allPresets,
 		availableTags,
 
+		// Helper functions
+		nameExists,
+
 		// Actions
+		setLoading,
+		setApplying,
 		addPreset,
 		deletePreset,
 		setCurrentPreset,
@@ -256,6 +343,7 @@ export const usePresetsStore = defineStore('presets', () => {
 		exportPresets,
 		importPresets,
 		loadFromStorage,
-		clearLogs,
+		clearPresets,
+		isDefaultPreset,
 	};
 });

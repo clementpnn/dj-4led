@@ -3,7 +3,7 @@
 		<!-- Header -->
 		<div class="panel-header">
 			<h2>Lighting Control</h2>
-			<button class="refresh-btn" :disabled="effects.loading" @click="handleRefreshEffects" title="Refresh">
+			<button class="refresh-btn" :disabled="isLoading" title="Refresh" @click="refreshAll">
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
 					<path d="M21 3v5h-5" />
@@ -13,23 +13,35 @@
 			</button>
 		</div>
 
-		<!-- Current Status -->
-		<div class="status-section">
-			<div class="status-row">
-				<div class="status-item">
-					<span class="status-label">Effect</span>
-					<span class="status-value">{{ effects.currentEffectName }}</span>
-				</div>
-				<div class="status-item">
-					<span class="status-label">Color Mode</span>
-					<span class="status-value">{{ colors.currentModeInfo?.label || colors.currentMode }}</span>
-				</div>
+		<!-- Brightness Control -->
+		<div class="control-section">
+			<div class="section-header">
+				<h3>Brightness</h3>
+				<span class="brightness-value">{{ Math.round(ledStore.brightness * 100) }}%</span>
 			</div>
-			<div v-if="effects.isTransitioning" class="transition-indicator">
-				<div class="transition-bar">
-					<div class="transition-progress" :style="{ width: `${effects.transitionProgress * 100}%` }"></div>
-				</div>
-				<span class="transition-text">{{ Math.round(effects.transitionProgress * 100) }}%</span>
+			<div class="brightness-container">
+				<input
+					type="range"
+					class="brightness-slider"
+					:value="ledStore.brightness"
+					min="0"
+					max="1"
+					step="0.01"
+					:disabled="isLoading"
+					@input="handleBrightnessChange"
+				/>
+			</div>
+			<div class="brightness-presets">
+				<button
+					v-for="preset in brightnessPresets"
+					:key="preset.value"
+					class="preset-btn"
+					:class="{ active: Math.abs(ledStore.brightness - preset.value) < 0.01 }"
+					:disabled="isLoading"
+					@click="setBrightnessPreset(preset.value)"
+				>
+					{{ preset.label }}
+				</button>
 			</div>
 		</div>
 
@@ -37,19 +49,18 @@
 		<div class="control-section">
 			<div class="section-header">
 				<h3>Effects</h3>
-				<span class="effect-count">{{ effects.availableEffects.length }} available</span>
+				<span class="count-badge">{{ effectsStore.availableEffects.length }}</span>
 			</div>
 			<div class="effects-grid">
 				<button
-					v-for="effect in effects.availableEffects"
+					v-for="effect in effectsStore.availableEffects"
 					:key="effect.id"
 					class="effect-btn"
-					:class="{ active: effects.currentEffect?.id === effect.id }"
-					:disabled="effects.loading || effects.isTransitioning"
+					:class="{ active: effectsStore.currentEffect?.id === effect.id }"
+					:disabled="isLoading"
 					@click="handleEffectSelect(effect.id)"
-					@mouseenter="handleEffectHover(effect.id)"
 				>
-					{{ effect.name }}
+					{{ effect.display_name || effect.name }}
 				</button>
 			</div>
 		</div>
@@ -58,104 +69,62 @@
 		<div class="control-section">
 			<div class="section-header">
 				<h3>Color Modes</h3>
-				<div v-if="colors.isCustomMode" class="color-preview" :style="colors.colorPreviewStyle">
-					<span class="hex-value">{{ colors.hexColor }}</span>
+				<div v-if="colorsStore.isCustomMode" class="color-preview" :style="colorsStore.colorPreviewStyle">
+					<span class="hex-value">{{ colorsStore.hexColor }}</span>
 				</div>
 			</div>
 
-			<div class="modes-container">
-				<div class="modes-grid">
-					<button
-						v-for="mode in colors.availableModes"
-						:key="mode.value"
-						class="mode-btn"
-						:class="{ active: colors.currentMode === mode.value }"
-						:disabled="colors.loading"
-						@click="handleModeSelect(mode.value)"
-					>
-						<span class="mode-emoji">{{ mode.emoji }}</span>
-						<span class="mode-label">{{ mode.label }}</span>
-					</button>
-				</div>
+			<div class="modes-grid">
+				<button
+					v-for="mode in colorsStore.availableModes"
+					:key="mode.value"
+					class="mode-btn"
+					:class="{ active: colorsStore.currentMode === mode.value }"
+					:disabled="isLoading"
+					@click="handleModeSelect(mode.value)"
+				>
+					<span class="mode-emoji">{{ mode.emoji }}</span>
+					<span class="mode-label">{{ mode.label }}</span>
+				</button>
+			</div>
 
-				<!-- Custom Color Controls -->
-				<div v-if="colors.isCustomMode" class="custom-controls">
-					<div class="color-sliders">
-						<div v-for="channel in colorChannels" :key="channel.key" class="slider-group">
-							<div class="slider-header">
-								<span class="channel-name">{{ channel.name }}</span>
-								<span class="channel-value">{{
-									Math.round(colors.customColor[channel.key] * 255)
-								}}</span>
-							</div>
-							<input
-								:value="colors.customColor[channel.key]"
-								type="range"
-								min="0"
-								max="1"
-								step="0.01"
-								class="color-slider"
-								:class="`slider-${channel.key}`"
-								:disabled="colors.loading"
-								@input="
-									handleColorChange(
-										channel.key,
-										Number(($event.target as HTMLInputElement)?.value || 0)
-									)
-								"
-							/>
+			<!-- Custom Color Controls -->
+			<div v-if="colorsStore.isCustomMode" class="custom-controls">
+				<div class="color-sliders">
+					<div v-for="channel in colorChannels" :key="channel.key" class="slider-group">
+						<div class="slider-header">
+							<span class="channel-name">{{ channel.name }}</span>
+							<span class="channel-value">{{
+								Math.round(colorsStore.customColor[channel.key] * 255)
+							}}</span>
 						</div>
-					</div>
-
-					<div class="hex-controls">
-						<div class="hex-input-group">
-							<input
-								:value="hexInputValue"
-								type="text"
-								class="hex-input"
-								placeholder="#FF8000"
-								:disabled="colors.loading"
-								@input="handleHexInputChange"
-							/>
-							<button class="apply-btn" :disabled="colors.loading || !isValidHex" @click="applyHexColor">
-								Apply
-							</button>
-						</div>
-						<button class="reset-btn" :disabled="colors.loading" @click="resetToDefault">Reset</button>
+						<input
+							:value="colorsStore.customColor[channel.key]"
+							type="range"
+							min="0"
+							max="1"
+							step="0.01"
+							class="color-slider"
+							:class="`slider-${channel.key}`"
+							:disabled="isLoading"
+							@input="
+								handleColorChange(channel.key, Number(($event.target as HTMLInputElement)?.value || 0))
+							"
+						/>
 					</div>
 				</div>
-			</div>
-		</div>
 
-		<!-- Effect Details (si disponible) -->
-		<div v-if="effects.effectInfo" class="details-section">
-			<div class="section-header">
-				<h3>Effect Details</h3>
-			</div>
-			<div class="details-content">
-				<div class="detail-item">
-					<span class="detail-label">Name</span>
-					<span class="detail-value">{{ effects.effectInfo.name }}</span>
-				</div>
-				<div class="detail-item">
-					<span class="detail-label">Description</span>
-					<span class="detail-value">{{ effects.effectInfo.description }}</span>
-				</div>
-				<div v-if="effects.effectInfo.performance_impact" class="detail-item">
-					<span class="detail-label">Performance</span>
-					<span class="detail-value">{{ effects.effectInfo.performance_impact }}</span>
-				</div>
-				<div class="detail-item">
-					<span class="detail-label">Transitions</span>
-					<span class="detail-value">{{
-						effects.effectInfo.supports_transitions ? 'Supported' : 'Not supported'
-					}}</span>
-				</div>
-				<div class="detail-item">
-					<span class="detail-label">Custom Colors</span>
-					<span class="detail-value">{{
-						effects.effectInfo.supports_custom_colors ? 'Supported' : 'Not supported'
-					}}</span>
+				<div class="hex-controls">
+					<input
+						v-model="hexInputValue"
+						type="text"
+						class="hex-input"
+						placeholder="#FF8000"
+						:disabled="isLoading"
+						@keyup.enter="applyHexColor"
+					/>
+					<button class="hex-btn" :disabled="isLoading || !isValidHex" @click="applyHexColor">Apply</button>
+					<button class="hex-btn" :disabled="isLoading" @click="resetToDefault">Reset</button>
 				</div>
 			</div>
 		</div>
@@ -163,110 +132,145 @@
 </template>
 
 <script setup lang="ts">
-	import { computed, ref, watch } from 'vue';
-	import { useColors } from '../composables/useColors';
-	import { useEffects } from '../composables/useEffects';
-	import type { CustomColor } from '../types';
+	import { computed, onMounted, ref, watch } from 'vue';
 
-	interface ColorChannel {
-		key: keyof CustomColor;
-		name: string;
-	}
+	import { useColors } from '@/composables/useColors';
+	import { useEffects } from '@/composables/useEffects';
+	import { useLED } from '@/composables/useLED';
+	import { useColorsStore } from '@/stores/colors';
+	import { useEffectsStore } from '@/stores/effects';
+	import { useLEDStore } from '@/stores/led';
+	import type { CustomColor } from '@/types';
+
+	// Stores
+	const colorsStore = useColorsStore();
+	const effectsStore = useEffectsStore();
+	const ledStore = useLEDStore();
 
 	// Composables
-	const colors = useColors();
-	const effects = useEffects();
+	const colorsAPI = useColors();
+	const effectsAPI = useEffects();
+	const ledAPI = useLED();
 
 	// Local state
-	const hexInputValue = ref(colors.hexColor);
+	const hexInputValue = ref('#FF8000');
+	const isChangingEffect = ref(false);
+	const isChangingColor = ref(false);
+	const isChangingBrightness = ref(false);
 
-	// Color channels configuration
-	const colorChannels: ColorChannel[] = [
-		{ key: 'r', name: 'Red' },
-		{ key: 'g', name: 'Green' },
-		{ key: 'b', name: 'Blue' },
+	// Constants
+	const brightnessPresets = [
+		{ label: '10%', value: 0.1 },
+		{ label: '25%', value: 0.25 },
+		{ label: '50%', value: 0.5 },
+		{ label: '75%', value: 0.75 },
+		{ label: '100%', value: 1.0 },
 	];
 
-	// Computed properties
-	const isValidHex = computed(() => {
-		return /^#[0-9A-Fa-f]{6}$/.test(hexInputValue.value);
-	});
+	const colorChannels = [
+		{ key: 'r' as keyof CustomColor, name: 'Red' },
+		{ key: 'g' as keyof CustomColor, name: 'Green' },
+		{ key: 'b' as keyof CustomColor, name: 'Blue' },
+	];
 
-	// Watch for hex color changes from store to sync input
+	// Computed
+	const isLoading = computed(() => isChangingEffect.value || isChangingColor.value || isChangingBrightness.value);
+
+	const isValidHex = computed(() => /^#[0-9A-Fa-f]{6}$/.test(hexInputValue.value));
+
+	// Watch hex color
 	watch(
-		() => colors.hexColor,
+		() => colorsStore.hexColor,
 		(newHex) => {
-			hexInputValue.value = newHex;
-		}
+			if (newHex && newHex !== hexInputValue.value) {
+				hexInputValue.value = newHex;
+			}
+		},
+		{ immediate: true }
 	);
 
+	// Brightness handlers
+	const handleBrightnessChange = async (event: Event) => {
+		const target = event.target as HTMLInputElement;
+		if (!target || isChangingBrightness.value) return;
+
+		isChangingBrightness.value = true;
+		try {
+			await ledAPI.setBrightness(Number(target.value));
+		} finally {
+			setTimeout(() => (isChangingBrightness.value = false), 100);
+		}
+	};
+
+	const setBrightnessPreset = async (value: number) => {
+		if (isChangingBrightness.value) return;
+
+		isChangingBrightness.value = true;
+		try {
+			await ledAPI.setBrightness(value);
+		} finally {
+			setTimeout(() => (isChangingBrightness.value = false), 100);
+		}
+	};
+
 	// Effect handlers
-	const handleEffectSelect = async (effectId: number): Promise<void> => {
-		try {
-			await effects.setEffect(effectId);
-		} catch (error) {
-			console.error('Failed to select effect:', error);
-		}
-	};
+	const handleEffectSelect = async (effectId: number) => {
+		if (isChangingEffect.value || effectsStore.currentEffect?.id === effectId) return;
 
-	const handleEffectHover = async (effectId: number): Promise<void> => {
+		isChangingEffect.value = true;
 		try {
-			await effects.getEffectInfo(effectId);
-		} catch (error) {
-			console.error('Failed to get effect info:', error);
-		}
-	};
-
-	const handleRefreshEffects = async (): Promise<void> => {
-		try {
-			await effects.getEffectsList();
-		} catch (error) {
-			console.error('Failed to refresh effects:', error);
+			await effectsAPI.setEffect(effectId);
+		} finally {
+			setTimeout(() => (isChangingEffect.value = false), 300);
 		}
 	};
 
 	// Color handlers
-	const handleModeSelect = async (mode: string): Promise<void> => {
+	const handleModeSelect = async (mode: string) => {
+		if (isChangingColor.value || colorsStore.currentMode === mode) return;
+
+		isChangingColor.value = true;
 		try {
-			await colors.setColorMode(mode);
-		} catch (error) {
-			console.error('Failed to set color mode:', error);
+			await colorsAPI.setColorMode(mode);
+		} finally {
+			setTimeout(() => (isChangingColor.value = false), 300);
 		}
 	};
 
-	const handleColorChange = async (channel: keyof CustomColor, value: number): Promise<void> => {
-		try {
-			const newColor = { ...colors.customColor };
-			newColor[channel] = value;
-			await colors.setCustomColor(newColor);
-		} catch (error) {
-			console.error('Failed to change color:', error);
-		}
+	const handleColorChange = async (channel: keyof CustomColor, value: number) => {
+		if (isLoading.value) return;
+
+		const newColor = { ...colorsStore.customColor };
+		newColor[channel] = value;
+		await colorsAPI.setCustomColor(newColor);
 	};
 
-	const handleHexInputChange = (event: Event): void => {
-		const input = event.target as HTMLInputElement;
-		hexInputValue.value = input.value;
+	const applyHexColor = async () => {
+		if (!isValidHex.value || isLoading.value) return;
+		await colorsAPI.setColorFromHex(hexInputValue.value);
 	};
 
-	const applyHexColor = async (): Promise<void> => {
-		if (isValidHex.value) {
-			try {
-				await colors.setColorFromHex(hexInputValue.value);
-			} catch (error) {
-				console.error('Failed to apply hex color:', error);
-			}
-		}
+	const resetToDefault = async () => {
+		if (isLoading.value) return;
+		await colorsAPI.setCustomColor({ r: 1, g: 0.5, b: 0 });
+		hexInputValue.value = '#FF8000';
 	};
 
-	const resetToDefault = async (): Promise<void> => {
-		try {
-			await colors.setCustomColor({ r: 1, g: 0.5, b: 0 });
-			hexInputValue.value = '#FF8000';
-		} catch (error) {
-			console.error('Failed to reset color:', error);
-		}
+	// Refresh all data
+	const refreshAll = async () => {
+		await Promise.all([
+			effectsAPI.getEffectsList(),
+			effectsAPI.getCurrentEffect(),
+			colorsAPI.getColorMode(),
+			colorsAPI.getCustomColor(),
+			ledAPI.getBrightness(),
+		]);
 	};
+
+	// Initialize
+	onMounted(() => {
+		setTimeout(refreshAll, 100);
+	});
 </script>
 
 <style scoped>
@@ -311,7 +315,6 @@
 	.refresh-btn:hover:not(:disabled) {
 		background: #30363d;
 		color: #c9d1d9;
-		transform: rotate(90deg);
 	}
 
 	.refresh-btn:disabled {
@@ -319,71 +322,7 @@
 		cursor: not-allowed;
 	}
 
-	/* Status Section */
-	.status-section {
-		background: #161b22;
-		border: 1px solid #21262d;
-		border-radius: 4px;
-		padding: 1rem;
-		margin-bottom: 1.5rem;
-	}
-
-	.status-row {
-		display: flex;
-		gap: 2rem;
-		margin-bottom: 0.75rem;
-	}
-
-	.status-item {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-		flex: 1;
-	}
-
-	.status-label {
-		font-size: 0.75rem;
-		font-weight: 500;
-		color: #7d8590;
-		text-transform: uppercase;
-		letter-spacing: 0.025em;
-	}
-
-	.status-value {
-		font-size: 0.875rem;
-		font-weight: 600;
-		color: #c9d1d9;
-	}
-
-	.transition-indicator {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-	}
-
-	.transition-bar {
-		flex: 1;
-		height: 4px;
-		background: #21262d;
-		border-radius: 2px;
-		overflow: hidden;
-	}
-
-	.transition-progress {
-		height: 100%;
-		background: #c9d1d9;
-		transition: width 0.3s ease;
-	}
-
-	.transition-text {
-		font-size: 0.75rem;
-		color: #7d8590;
-		font-weight: 600;
-		min-width: 35px;
-		font-family: monospace;
-	}
-
-	/* Control Sections */
+	/* Sections */
 	.control-section {
 		margin-bottom: 1.5rem;
 	}
@@ -406,16 +345,76 @@
 		color: #c9d1d9;
 	}
 
-	.effect-count {
-		font-size: 0.75rem;
+	/* Brightness */
+	.brightness-value {
+		font-size: 0.875rem;
 		color: #7d8590;
-		background: #21262d;
-		padding: 0.25rem 0.5rem;
-		border-radius: 12px;
-		font-weight: 500;
+		font-weight: 600;
+		font-family: monospace;
 	}
 
-	/* Effects Grid */
+	.brightness-container {
+		margin-bottom: 1rem;
+	}
+
+	.brightness-slider {
+		width: 100%;
+		height: 4px;
+		background: #21262d;
+		border-radius: 2px;
+		outline: none;
+		appearance: none;
+		-webkit-appearance: none;
+		cursor: pointer;
+	}
+
+	.brightness-slider::-webkit-slider-thumb {
+		appearance: none;
+		width: 16px;
+		height: 16px;
+		background: #58a6ff;
+		border-radius: 50%;
+		cursor: pointer;
+	}
+
+	.brightness-presets {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.preset-btn {
+		flex: 1;
+		padding: 0.5rem;
+		background: #161b22;
+		border: 1px solid #21262d;
+		border-radius: 4px;
+		color: #7d8590;
+		font-size: 0.75rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.preset-btn:hover:not(:disabled) {
+		background: #21262d;
+		color: #c9d1d9;
+	}
+
+	.preset-btn.active {
+		background: #21262d;
+		color: #58a6ff;
+		border-color: #30363d;
+	}
+
+	/* Effects */
+	.count-badge {
+		font-size: 0.75rem;
+		color: #7d8590;
+		background: #161b22;
+		padding: 0.25rem 0.5rem;
+		border-radius: 4px;
+	}
+
 	.effects-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -442,17 +441,11 @@
 
 	.effect-btn.active {
 		background: #21262d;
-		border-color: #c9d1d9;
-		color: #c9d1d9;
-		box-shadow: 0 0 0 1px rgba(201, 209, 217, 0.3);
+		color: #58a6ff;
+		border-color: #30363d;
 	}
 
-	.effect-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	/* Color Preview */
+	/* Color Modes */
 	.color-preview {
 		width: 50px;
 		height: 24px;
@@ -461,7 +454,6 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		position: relative;
 	}
 
 	.hex-value {
@@ -472,17 +464,11 @@
 		font-family: monospace;
 	}
 
-	/* Modes */
-	.modes-container {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
 	.modes-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
 		gap: 0.75rem;
+		margin-bottom: 1rem;
 	}
 
 	.mode-btn {
@@ -506,13 +492,8 @@
 
 	.mode-btn.active {
 		background: #21262d;
-		border-color: #c9d1d9;
-		box-shadow: 0 0 0 1px rgba(201, 209, 217, 0.3);
-	}
-
-	.mode-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
+		color: #58a6ff;
+		border-color: #30363d;
 	}
 
 	.mode-emoji {
@@ -522,7 +503,6 @@
 	.mode-label {
 		font-size: 0.75rem;
 		font-weight: 500;
-		text-align: center;
 	}
 
 	/* Custom Controls */
@@ -531,15 +511,13 @@
 		border: 1px solid #21262d;
 		border-radius: 4px;
 		padding: 1rem;
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
 	}
 
 	.color-sliders {
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
+		margin-bottom: 1rem;
 	}
 
 	.slider-group {
@@ -559,18 +537,12 @@
 		font-weight: 500;
 		color: #7d8590;
 		text-transform: uppercase;
-		letter-spacing: 0.025em;
 	}
 
 	.channel-value {
 		font-size: 0.75rem;
 		font-weight: 600;
 		color: #c9d1d9;
-		background: #21262d;
-		padding: 0.2rem 0.4rem;
-		border-radius: 3px;
-		min-width: 35px;
-		text-align: center;
 		font-family: monospace;
 	}
 
@@ -587,18 +559,10 @@
 
 	.color-slider::-webkit-slider-thumb {
 		appearance: none;
-		-webkit-appearance: none;
 		width: 16px;
 		height: 16px;
-		background: #c9d1d9;
 		border-radius: 50%;
 		cursor: pointer;
-		transition: all 0.2s ease;
-	}
-
-	.color-slider::-webkit-slider-thumb:hover {
-		background: #e6edf3;
-		transform: scale(1.1);
 	}
 
 	.slider-r::-webkit-slider-thumb {
@@ -614,13 +578,6 @@
 	/* Hex Controls */
 	.hex-controls {
 		display: flex;
-		gap: 0.75rem;
-		align-items: flex-end;
-	}
-
-	.hex-input-group {
-		flex: 1;
-		display: flex;
 		gap: 0.5rem;
 	}
 
@@ -633,16 +590,14 @@
 		color: #c9d1d9;
 		font-family: monospace;
 		font-size: 0.875rem;
-		transition: all 0.2s ease;
 	}
 
 	.hex-input:focus {
 		outline: none;
-		border-color: #c9d1d9;
+		border-color: #58a6ff;
 	}
 
-	.apply-btn,
-	.reset-btn {
+	.hex-btn {
 		padding: 0.5rem 1rem;
 		background: #21262d;
 		border: 1px solid #30363d;
@@ -652,56 +607,15 @@
 		font-weight: 500;
 		cursor: pointer;
 		transition: all 0.2s ease;
-		white-space: nowrap;
 	}
 
-	.apply-btn:hover:not(:disabled),
-	.reset-btn:hover:not(:disabled) {
+	.hex-btn:hover:not(:disabled) {
 		background: #30363d;
-		border-color: #c9d1d9;
 	}
 
-	.apply-btn:disabled,
-	.reset-btn:disabled {
+	.hex-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
-	}
-
-	/* Details Section */
-	.details-section {
-		background: #161b22;
-		border: 1px solid #21262d;
-		border-radius: 4px;
-		padding: 1rem;
-	}
-
-	.details-content {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-	}
-
-	.detail-item {
-		display: flex;
-		gap: 1rem;
-		align-items: flex-start;
-	}
-
-	.detail-label {
-		font-size: 0.75rem;
-		font-weight: 500;
-		color: #7d8590;
-		min-width: 70px;
-		flex-shrink: 0;
-		text-transform: uppercase;
-		letter-spacing: 0.025em;
-	}
-
-	.detail-value {
-		font-size: 0.875rem;
-		color: #c9d1d9;
-		flex: 1;
-		line-height: 1.4;
 	}
 
 	/* Responsive */
@@ -710,15 +624,7 @@
 			padding: 1rem;
 		}
 
-		.status-row {
-			flex-direction: column;
-			gap: 0.75rem;
-		}
-
-		.effects-grid {
-			grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-		}
-
+		.effects-grid,
 		.modes-grid {
 			grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
 		}
@@ -727,13 +633,8 @@
 			flex-direction: column;
 		}
 
-		.detail-item {
-			flex-direction: column;
-			gap: 0.25rem;
-		}
-
-		.detail-label {
-			min-width: auto;
+		.brightness-presets {
+			flex-wrap: wrap;
 		}
 	}
 </style>

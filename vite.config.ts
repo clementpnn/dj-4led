@@ -1,17 +1,24 @@
 import vue from '@vitejs/plugin-vue';
+import path from 'path';
 import { defineConfig } from 'vite';
 
 const host = process.env.TAURI_DEV_HOST;
 
-// https://vitejs.dev/config/
-export default defineConfig(async () => ({
+// Configuration Vite adaptée Tauri, Vue 3 et alias propres
+export default defineConfig({
 	plugins: [vue()],
-
-	// Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-	//
-	// 1. prevent vite from obscuring rust errors
+	resolve: {
+		alias: {
+			'@': path.resolve(__dirname, './src'),
+			'@components': path.resolve(__dirname, './src/components'),
+			'@views': path.resolve(__dirname, './src/views'),
+			'@stores': path.resolve(__dirname, './src/stores'),
+			'@utils': path.resolve(__dirname, './src/utils'),
+			'@types': path.resolve(__dirname, './src/types'),
+		},
+		extensions: ['.ts', '.js', '.vue', '.json'],
+	},
 	clearScreen: false,
-	// 2. tauri expects a fixed port, fail if that port is not available
 	server: {
 		port: 1420,
 		strictPort: true,
@@ -24,11 +31,13 @@ export default defineConfig(async () => ({
 				}
 			: undefined,
 		watch: {
-			// 3. tell vite to ignore watching `src-tauri`
 			ignored: ['**/src-tauri/**'],
 		},
 	},
 	build: {
 		outDir: 'src-tauri/dist',
+		emptyOutDir: true,
+		sourcemap: process.env.TAURI_DEBUG ? true : false,
+		target: process.env.TAURI_PLATFORM == 'windows' ? 'chrome105' : 'safari13',
 	},
-}));
+});

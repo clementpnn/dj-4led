@@ -1,29 +1,29 @@
 // Audio
-export type * from './audio';
+export type * from '@/types/audio';
 
 // Effects
-export type * from './effects';
+export type * from '@/types/effects';
 
 // Colors
-export type * from './colors';
+export type * from '@/types/colors';
 
 // LED
-export type * from './led';
+export type * from '@/types/led';
 
 // Frames
-export type * from './frames';
+export type * from '@/types/frames';
 
 // System
-export type * from './system';
+export type * from '@/types/system';
 
 // Presets
-export type * from './presets';
+export type * from '@/types/presets';
 
 // Logs
-export type * from './logs';
+export type * from '@/types/logs';
 
 // Common
-export type * from './common';
+export type * from '@/types/common';
 
 // Events
-export type * from './events';
+export type * from '@/types/events';

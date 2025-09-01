@@ -4,21 +4,21 @@
 		<div class="panel-header">
 			<div class="header-title">
 				<h2>Presets</h2>
-				<div class="presets-count">{{ allPresets.length }} available</div>
+				<div class="presets-count">{{ store.allPresets.length }} available</div>
 			</div>
 
-			<div v-if="currentPreset" class="current-preset-mini">
-				<div class="current-name">{{ currentPreset.name }}</div>
+			<div v-if="store.currentPreset" class="current-preset-mini">
+				<div class="current-name">{{ store.currentPreset.name }}</div>
 			</div>
 		</div>
 
 		<!-- Quick Actions -->
 		<div class="quick-actions">
-			<button class="quick-btn create" :disabled="loading" @click="showCreateForm = !showCreateForm">
+			<button class="quick-btn create" :disabled="store.loading" @click="showCreateForm = !showCreateForm">
 				<span class="btn-text">{{ showCreateForm ? 'Cancel' : 'Create New' }}</span>
 			</button>
 
-			<button class="quick-btn export" :disabled="loading" @click="handleExportPresets">
+			<button class="quick-btn export" :disabled="store.loading" @click="handleExportPresets">
 				<span class="btn-text">Export</span>
 			</button>
 
@@ -28,62 +28,42 @@
 			</label>
 		</div>
 
-		<!-- Create Form - Amélioration design -->
+		<!-- Create Form -->
 		<div v-if="showCreateForm" class="create-form">
 			<div class="form-container">
 				<div class="form-header">
-					<div class="header-icon">
-						<svg
-							width="20"
-							height="20"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-						>
-							<path d="M12 5v14M5 12h14" />
-						</svg>
-					</div>
-					<div class="header-content">
-						<h3>Create New Preset</h3>
-						<p>Save your current configuration as a new preset</p>
-					</div>
+					<h3>Create New Preset</h3>
+					<p>Save your current configuration as a new preset</p>
 				</div>
 
-				<div class="form-body">
+				<div class="form-content">
 					<div class="input-group">
-						<label class="input-label">
-							<span class="label-text">Preset Name</span>
-							<span class="label-required">*</span>
-						</label>
+						<label class="input-label"> Preset Name <span class="required">*</span> </label>
 						<input
 							v-model="newPresetName"
 							type="text"
 							class="form-input"
+							:class="{ error: nameErrorMessage }"
 							placeholder="Enter preset name..."
 							@keyup.enter="handleCreatePreset"
 						/>
-						<div class="input-hint">Choose a descriptive name for your preset</div>
+						<div v-if="nameErrorMessage" class="error-message">{{ nameErrorMessage }}</div>
 					</div>
 
 					<div class="input-group">
-						<label class="input-label">
-							<span class="label-text">Description</span>
-							<span class="label-optional">(optional)</span>
-						</label>
+						<label class="input-label">Description</label>
 						<textarea
 							v-model="newPresetDescription"
 							class="form-textarea"
 							placeholder="Describe what makes this preset special..."
 							rows="3"
 						></textarea>
-						<div class="input-hint">Add details about when to use this preset</div>
 					</div>
 				</div>
 
-				<div class="form-footer">
-					<button class="action-btn secondary" @click="resetCreateForm">Cancel</button>
-					<button class="action-btn primary" :disabled="!newPresetName.trim()" @click="handleCreatePreset">
+				<div class="form-actions">
+					<button class="btn-secondary" @click="resetCreateForm">Cancel</button>
+					<button class="btn-primary" :disabled="!isNameValid || store.loading" @click="handleCreatePreset">
 						<svg
 							width="16"
 							height="16"
@@ -107,7 +87,12 @@
 			<h3 class="section-title">Available Presets</h3>
 
 			<div class="presets-grid">
-				<div v-for="preset in allPresets" :key="preset.id" class="preset-card">
+				<div
+					v-for="preset in store.allPresets"
+					:key="preset.id"
+					class="preset-card"
+					:class="{ active: store.currentPreset?.id === preset.id }"
+				>
 					<!-- Card Header -->
 					<div class="card-header">
 						<div class="preset-info">
@@ -128,9 +113,9 @@
 						</div>
 						<div class="config-item">
 							<span class="config-label">Brightness:</span>
-							<span class="config-value"
-								>{{ Math.round((preset.config.led?.brightness || 1) * 100) }}%</span
-							>
+							<span class="config-value">
+								{{ Math.round((preset.config.led?.brightness || 1) * 100) }}%
+							</span>
 						</div>
 					</div>
 
@@ -138,25 +123,25 @@
 					<div class="card-actions">
 						<button
 							class="card-btn apply"
-							:disabled="currentPreset?.id === preset.id || isApplying"
+							:disabled="store.currentPreset?.id === preset.id || store.isApplying"
 							@click="handleApplyPreset(preset.id)"
 						>
-							{{ currentPreset?.id === preset.id ? 'Active' : 'Apply' }}
+							{{ store.currentPreset?.id === preset.id ? 'Active' : 'Apply' }}
 						</button>
 
 						<button
 							class="card-btn duplicate"
-							@click="handleDuplicatePreset(preset.id)"
 							title="Duplicate preset"
+							@click="handleDuplicatePreset(preset.id)"
 						>
 							Copy
 						</button>
 
 						<button
-							v-if="!isDefaultPreset(preset.id)"
+							v-if="!store.isDefaultPreset(preset.id)"
 							class="card-btn delete"
-							@click="handleDeletePreset(preset.id)"
 							title="Delete preset"
+							@click="handleDeletePreset(preset.id)"
 						>
 							Delete
 						</button>
@@ -169,101 +154,144 @@
 
 <script setup lang="ts">
 	import { computed, ref } from 'vue';
-	import { useAudio } from '../composables/useAudio';
-	import { useColors } from '../composables/useColors';
-	import { useEffects } from '../composables/useEffects';
-	import { useLED } from '../composables/useLED';
-	import { usePresets } from '../composables/usePresets';
 
-	// Composables
-	const presets = usePresets();
+	import { useAudio } from '@/composables/useAudio';
+	import { useColors } from '@/composables/useColors';
+	import { useEffects } from '@/composables/useEffects';
+	import { useLED } from '@/composables/useLED';
+	import { usePresets } from '@/composables/usePresets';
+	import { usePresetsStore } from '@/stores/presets';
+
+	// Store - Source unique de vérité pour les données
+	const store = usePresetsStore();
+
+	// Composables - Pour la logique métier uniquement
+	const presetsComposable = usePresets();
 	const audio = useAudio();
 	const colors = useColors();
 	const effects = useEffects();
 	const led = useLED();
 
-	// Local state
+	// Local UI state only
 	const showCreateForm = ref(false);
 	const newPresetName = ref('');
 	const newPresetDescription = ref('');
 	const fileInput = ref<HTMLInputElement>();
 
-	// Computed - Conversion en boolean pour TypeScript
-	const loading = computed(() => !!presets.loading);
-	const isApplying = computed(() => !!presets.isApplying);
-	const allPresets = computed(() => presets.allPresets);
-	const currentPreset = computed(() => presets.currentPreset);
+	// Computed for form validation - utilise directement le store
+	const isNameValid = computed(() => {
+		const trimmed = newPresetName.value.trim();
+		if (!trimmed || trimmed.length < 2) return false;
+		return !store.nameExists(trimmed);
+	});
 
-	const isDefaultPreset = (presetId: string): boolean => {
-		const defaultIds = ['party-mode', 'chill-mode', 'focus-mode', 'gaming-mode'];
-		return defaultIds.includes(presetId);
-	};
+	const nameErrorMessage = computed(() => {
+		const trimmed = newPresetName.value.trim();
+		if (!trimmed) return '';
+		if (trimmed.length < 2) return 'Name must be at least 2 characters';
+		if (store.nameExists(trimmed)) return 'A preset with this name already exists';
+		return '';
+	});
 
-	// Handlers
+	// Handlers - utilisent le composable pour la logique
 	const handleCreatePreset = async (): Promise<void> => {
-		if (!newPresetName.value.trim()) return;
+		if (!newPresetName.value.trim() || !isNameValid.value) {
+			console.warn('❌ [PRESETS_PANEL] Invalid name or name already exists');
+			return;
+		}
 
 		const composables = { audio, effects, colors, led };
-		const result = await presets.createPreset(
+		const result = await presetsComposable.createPreset(
 			newPresetName.value.trim(),
 			newPresetDescription.value.trim(),
 			composables
 		);
 
 		if (result.success) {
+			console.log('✅ [PRESETS_PANEL] Preset created successfully');
 			resetCreateForm();
 		} else {
-			console.error('Failed to create preset:', result.message);
+			console.error('❌ [PRESETS_PANEL] Failed to create preset:', result.message);
 		}
 	};
 
 	const handleApplyPreset = async (presetId: string): Promise<void> => {
+		console.log('🎯 [PRESETS_PANEL] Applying preset:', presetId);
+
 		const composables = { audio, effects, colors, led };
-		const result = await presets.applyPreset(presetId, composables);
+		const result = await presetsComposable.applyPreset(presetId, composables);
 
-		if (!result.success) {
-			console.error('Failed to apply preset:', result.message);
+		if (result.success) {
+			console.log('✅ [PRESETS_PANEL] Preset applied successfully');
+		} else {
+			console.error('❌ [PRESETS_PANEL] Failed to apply preset:', result.message);
 		}
 	};
 
-	const handleDuplicatePreset = async (presetId: string): Promise<void> => {
-		const originalPreset = presets.getPresetById(presetId);
-		if (!originalPreset) return;
+	const handleDuplicatePreset = (presetId: string): void => {
+		const originalPreset = store.getPresetById(presetId);
+		if (!originalPreset) {
+			console.error('❌ [PRESETS_PANEL] Original preset not found:', presetId);
+			return;
+		}
 
-		const newName = `${originalPreset.name} (Copy)`;
-		const result = presets.duplicatePreset(presetId, newName);
+		let copyNumber = 1;
+		let newName = `${originalPreset.name} (Copy)`;
 
-		if (!result) {
-			console.error('Failed to duplicate preset');
+		while (store.nameExists(newName)) {
+			copyNumber++;
+			newName = `${originalPreset.name} (Copy ${copyNumber})`;
+		}
+
+		const result = store.duplicatePreset(presetId, newName);
+
+		if (result) {
+			console.log('✅ [PRESETS_PANEL] Preset duplicated successfully:', result);
+		} else {
+			console.error('❌ [PRESETS_PANEL] Failed to duplicate preset');
 		}
 	};
 
-	const handleDeletePreset = async (presetId: string): Promise<void> => {
-		const result = presets.deletePreset(presetId);
+	const handleDeletePreset = (presetId: string): void => {
+		const presetToDelete = store.getPresetById(presetId);
+		if (presetToDelete) {
+			console.log('🗑️ [PRESETS_PANEL] Found preset to delete:', presetToDelete.name);
+		}
 
-		if (!result) {
-			console.error('Failed to delete preset');
+		const result = store.deletePreset(presetId);
+
+		if (result) {
+			console.log('✅ [PRESETS_PANEL] Preset deleted successfully');
+		} else {
+			console.error('❌ [PRESETS_PANEL] Failed to delete preset - might be default preset');
 		}
 	};
 
 	const handleExportPresets = async (): Promise<void> => {
-		const result = presets.exportPresets();
+		console.log('🎯 [PRESETS_PANEL] Starting export process...');
 
-		if (!result.success) {
-			console.error('Failed to export presets:', result.message);
+		const result = presetsComposable.exportPresets();
+
+		if (result.success) {
+			console.log('✅ [PRESETS_PANEL] Presets exported successfully');
+		} else {
+			console.error('❌ [PRESETS_PANEL] Failed to export presets:', result.message);
 		}
 	};
 
 	const handleFileImport = async (event: Event): Promise<void> => {
 		const target = event.target as HTMLInputElement;
 		const file = target.files?.[0];
-		if (file) {
-			const result = await presets.importPresets(file);
-			target.value = '';
 
-			if (!result.success) {
-				console.error('Failed to import presets:', result.message);
-			}
+		if (!file) return;
+
+		const result = await presetsComposable.importPresets(file);
+		target.value = ''; // Reset file input
+
+		if (result.success) {
+			console.log('✅ [PRESETS_PANEL] Presets imported successfully:', result.message);
+		} else {
+			console.error('❌ [PRESETS_PANEL] Failed to import presets:', result.message);
 		}
 	};
 
@@ -293,6 +321,14 @@
 		margin-bottom: 1.5rem;
 		padding-bottom: 1rem;
 		border-bottom: 1px solid #21262d;
+	}
+
+	.header-title {
+		display: flex;
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		width: 100%;
 	}
 
 	.header-title h2 {
@@ -375,61 +411,44 @@
 		font-weight: 600;
 	}
 
-	/* Create Form - Design amélioré */
+	/* Create Form */
 	.create-form {
 		background: #161b22;
 		border: 1px solid #21262d;
-		border-radius: 12px;
+		border-radius: 8px;
 		margin-bottom: 1.5rem;
-		border-left: 3px solid #3fb950;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+		overflow: hidden;
 	}
 
 	.form-container {
-		padding: 1.5rem;
+		padding: 1.25rem;
 	}
 
 	.form-header {
-		display: flex;
-		align-items: center;
-		gap: 1rem;
-		margin-bottom: 1.5rem;
+		margin-bottom: 1.25rem;
 		padding-bottom: 1rem;
-		border-bottom: 1px solid rgba(63, 185, 80, 0.2);
+		border-bottom: 1px solid #21262d;
 	}
 
-	.header-icon {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 40px;
-		height: 40px;
-		background: rgba(63, 185, 80, 0.1);
-		border: 1px solid rgba(63, 185, 80, 0.3);
-		border-radius: 8px;
-		color: #3fb950;
-		flex-shrink: 0;
-	}
-
-	.header-content h3 {
-		margin: 0 0 0.25rem 0;
-		font-size: 1.1rem;
+	.form-header h3 {
+		margin: 0 0 0.5rem 0;
+		font-size: 1rem;
 		font-weight: 600;
 		color: #c9d1d9;
 	}
 
-	.header-content p {
+	.form-header p {
 		margin: 0;
 		font-size: 0.875rem;
 		color: #7d8590;
 		line-height: 1.4;
 	}
 
-	.form-body {
+	.form-content {
 		display: flex;
 		flex-direction: column;
-		gap: 1.25rem;
-		margin-bottom: 1.5rem;
+		gap: 1rem;
+		margin-bottom: 1.25rem;
 	}
 
 	.input-group {
@@ -438,36 +457,26 @@
 	}
 
 	.input-label {
+		font-size: 0.875rem;
+		font-weight: 500;
+		color: #c9d1d9;
+		margin-bottom: 0.5rem;
 		display: flex;
 		align-items: center;
 		gap: 0.25rem;
-		margin-bottom: 0.5rem;
-		font-size: 0.875rem;
-		font-weight: 600;
-		color: #c9d1d9;
 	}
 
-	.label-text {
-		color: #c9d1d9;
-	}
-
-	.label-required {
+	.required {
 		color: #f85149;
 		font-size: 0.75rem;
 	}
 
-	.label-optional {
-		color: #7d8590;
-		font-size: 0.75rem;
-		font-weight: 400;
-	}
-
 	.form-input,
 	.form-textarea {
-		padding: 0.875rem 1rem;
-		background: #21262d;
+		padding: 0.75rem;
+		background: #0d1117;
 		border: 1px solid #30363d;
-		border-radius: 8px;
+		border-radius: 6px;
 		color: #c9d1d9;
 		font-size: 0.875rem;
 		font-family: inherit;
@@ -480,25 +489,34 @@
 	.form-textarea:focus {
 		outline: none;
 		border-color: #3fb950;
-		box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.1);
-		background: #161b22;
+		background: #010409;
+	}
+
+	.form-input::placeholder,
+	.form-textarea::placeholder {
+		color: #7d8590;
+	}
+
+	.form-input.error,
+	.form-textarea.error {
+		border-color: #f85149;
+		background: rgba(248, 81, 73, 0.1);
+	}
+
+	.error-message {
+		margin-top: 0.5rem;
+		font-size: 0.75rem;
+		color: #f85149;
+		font-weight: 500;
 	}
 
 	.form-textarea {
 		resize: vertical;
 		min-height: 80px;
-		font-family: inherit;
 		line-height: 1.4;
 	}
 
-	.input-hint {
-		margin-top: 0.375rem;
-		font-size: 0.75rem;
-		color: #7d8590;
-		line-height: 1.3;
-	}
-
-	.form-footer {
+	.form-actions {
 		display: flex;
 		gap: 0.75rem;
 		justify-content: flex-end;
@@ -506,53 +524,48 @@
 		border-top: 1px solid #21262d;
 	}
 
-	.action-btn {
+	.btn-primary,
+	.btn-secondary {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		padding: 0.75rem 1.25rem;
-		border: 1px solid #30363d;
-		border-radius: 8px;
+		padding: 0.75rem 1rem;
+		border-radius: 6px;
 		font-size: 0.875rem;
-		font-weight: 600;
+		font-weight: 500;
 		cursor: pointer;
 		transition: all 0.2s ease;
+		border: 1px solid;
 		white-space: nowrap;
 	}
 
-	.action-btn.primary {
+	.btn-primary {
+		background: #238636;
+		border-color: #238636;
+		color: #fff;
+	}
+
+	.btn-primary:hover:not(:disabled) {
+		background: #2ea043;
+		border-color: #2ea043;
+	}
+
+	.btn-primary:disabled {
 		background: #21262d;
-		color: #3fb950;
-		border-color: #3fb950;
-		min-width: 140px;
-		justify-content: center;
-	}
-
-	.action-btn.primary:hover:not(:disabled) {
-		background: rgba(63, 185, 80, 0.1);
-		transform: translateY(-1px);
-		box-shadow: 0 2px 8px rgba(63, 185, 80, 0.2);
-	}
-
-	.action-btn.primary:disabled {
-		background: #21262d;
-		color: #7d8590;
-		border-color: #21262d;
-		cursor: not-allowed;
-		transform: none;
-		box-shadow: none;
-	}
-
-	.action-btn.secondary {
-		background: #161b22;
-		color: #7d8590;
-		border-color: #21262d;
-	}
-
-	.action-btn.secondary:hover:not(:disabled) {
-		background: #21262d;
-		color: #c9d1d9;
 		border-color: #30363d;
+		color: #7d8590;
+		cursor: not-allowed;
+	}
+
+	.btn-secondary {
+		background: #21262d;
+		border-color: #30363d;
+		color: #c9d1d9;
+	}
+
+	.btn-secondary:hover:not(:disabled) {
+		background: #30363d;
+		border-color: #484f58;
 	}
 
 	/* Presets Section */
@@ -577,7 +590,7 @@
 	.preset-card {
 		background: #161b22;
 		border: 1px solid #21262d;
-		border-radius: 12px;
+		border-radius: 8px;
 		padding: 1rem;
 		transition: all 0.2s ease;
 		position: relative;
@@ -593,6 +606,7 @@
 		background: rgba(63, 185, 80, 0.05);
 		border-color: #3fb950;
 		border-width: 2px;
+		padding: calc(1rem - 1px); /* Adjust for thicker border */
 	}
 
 	/* Card Header */
@@ -749,11 +763,12 @@
 			flex: 1 1 100%;
 		}
 
-		.form-footer {
+		.form-actions {
 			flex-direction: column;
 		}
 
-		.action-btn {
+		.btn-primary,
+		.btn-secondary {
 			width: 100%;
 		}
 	}
@@ -788,7 +803,8 @@
 
 	/* Loading states */
 	.quick-btn:disabled,
-	.action-btn:disabled,
+	.btn-primary:disabled,
+	.btn-secondary:disabled,
 	.card-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;

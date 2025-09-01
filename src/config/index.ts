@@ -1,3 +1,3 @@
-export * from './app';
-export * from './constants';
-export * from './defaults';
+export * from '@/config/app';
+export * from '@/config/constants';
+export * from '@/config/defaults';

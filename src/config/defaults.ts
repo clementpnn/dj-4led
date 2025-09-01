@@ -1,4 +1,4 @@
-import type { AudioConfig, CustomColor, LEDConfig, SystemConfig } from '../types';
+import type { AudioConfig, CustomColor, LEDConfig, SystemConfig } from '@/types';
 
 export const DEFAULT_AUDIO_CONFIG: AudioConfig = {
 	defaultGain: 1.0,

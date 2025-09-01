@@ -1,136 +1,134 @@
 // src-tauri/src/effects/applaudimetre.rs
 
-use super::*;
+use super::{Effect, get_color_config, hsv_to_rgb, rand};
+use rayon::prelude::*;
 
-pub struct Applaudimetre {
-    current_level: f32,
-    max_level: f32,
-    max_hold_time: f32,
-    smoothed_level: f32,
-    peak_history: Vec<f32>,
-    animation_time: f32,
-    level_history: Vec<f32>,
-    peak_sparkles: Vec<PeakSparkle>,
-    sensitivity: f32,
-    auto_gain: f32,
-    background_pulse: f32,
-    frame_count: u64,
-    decay_timer: f32,
-    noise_gate: f32,
-}
-
+/// Particule d'éclat pour les effets de pointe
+#[derive(Clone)]
 struct PeakSparkle {
     x: f32,
     y: f32,
+    velocity_x: f32,
+    velocity_y: f32,
     life: f32,
     max_life: f32,
     brightness: f32,
     color: (f32, f32, f32),
-    velocity_x: f32,
-    velocity_y: f32,
     size: f32,
+}
+
+impl PeakSparkle {
+    fn new(x: f32, y: f32, color: (f32, f32, f32)) -> Self {
+        let life = 0.8 + rand() * 0.7;
+        Self {
+            x,
+            y,
+            velocity_x: (rand() - 0.5) * 2.0,
+            velocity_y: -0.5 - rand() * 1.5,
+            life,
+            max_life: life,
+            brightness: 0.7 + rand() * 0.3,
+            color,
+            size: 1.0 + rand() * 2.0,
+        }
+    }
+
+    fn update(&mut self) {
+        self.x += self.velocity_x;
+        self.y += self.velocity_y;
+        self.velocity_y += 0.05; // Gravité
+        self.velocity_x *= 0.98; // Friction
+        self.life -= 0.015;
+    }
+
+    fn is_alive(&self) -> bool {
+        self.life > 0.0
+    }
+
+    fn get_alpha(&self) -> f32 {
+        (self.life / self.max_life).powf(0.5)
+    }
+}
+
+/// Effet d'applaudimètre avec visualisation de niveau sonore
+pub struct Applaudimetre {
+    // Niveaux audio
+    current_level: f32,
+    max_level: f32,
+    max_hold_time: f32,
+    smoothed_level: f32,
+
+    // Historiques
+    peak_history: Vec<f32>,
+    level_history: Vec<f32>,
+
+    // Animation
+    animation_time: f32,
+    background_pulse: f32,
+
+    // Particules
+    peak_sparkles: Vec<PeakSparkle>,
+
+    // Configuration
+    sensitivity: f32,
+    auto_gain: f32,
+    decay_rate: f32,
+
+    // Rendu
+    bar_width: usize,
+    bar_left: usize,
+    bar_right: usize,
+
+    // Modes de visualisation
+    show_peak_hold: bool,
+    show_history_trail: bool,
+    show_sparkles: bool,
+    show_graduations: bool,
 }
 
 impl Applaudimetre {
     pub fn new() -> Self {
+        let bar_width = 48; // Largeur de la barre
+        let bar_left = (128 - bar_width) / 2; // Centré
+        let bar_right = bar_left + bar_width;
+
         Self {
             current_level: 0.0,
             max_level: 0.0,
             max_hold_time: 0.0,
             smoothed_level: 0.0,
-            peak_history: vec![0.0; 30],
+            peak_history: vec![0.0; 60], // 1 seconde à 60fps
+            level_history: vec![0.0; bar_width],
             animation_time: 0.0,
-            level_history: vec![0.0; 48], // Réduit pour optimisation
-            peak_sparkles: Vec::with_capacity(50), // Pré-allocation
-            sensitivity: 2.8,
-            auto_gain: 1.0,
             background_pulse: 0.0,
-            frame_count: 0,
-            decay_timer: 0.0,
-            noise_gate: 0.02, // Seuil de bruit
+            peak_sparkles: Vec::new(),
+            sensitivity: 2.5,
+            auto_gain: 1.0,
+            decay_rate: 0.006,
+            bar_width,
+            bar_left,
+            bar_right,
+            show_peak_hold: true,
+            show_history_trail: true,
+            show_sparkles: true,
+            show_graduations: true,
         }
     }
 
-    fn get_color_for_level(&self, level: f32, is_max_indicator: bool) -> (f32, f32, f32) {
-        let color_config = get_color_config();
-
-        if is_max_indicator {
-            match color_config.mode.as_str() {
-                "rainbow" => {
-                    let hue = (self.animation_time * 0.015) % 1.0;
-                    let (r, g, b) = hsv_to_rgb(hue, 0.9, 1.0);
-                    (r * 1.2, g * 1.2, b * 1.2)
-                }
-                "fire" => (1.0, 0.9, 0.1),
-                "ocean" => (0.1, 0.9, 1.0),
-                "sunset" => (1.0, 0.5, 0.0),
-                "custom" => {
-                    let (r, g, b) = color_config.custom_color;
-                    (
-                        (r * 1.5).min(1.0),
-                        (g * 1.5).min(1.0),
-                        (b * 1.5).min(1.0),
-                    )
-                }
-                _ => (1.0, 1.0, 1.0),
-            }
-        } else {
-            let normalized_level = level.clamp(0.0, 1.0);
-            match color_config.mode.as_str() {
-                "rainbow" => {
-                    // Amélioration du dégradé arc-en-ciel
-                    let hue = normalized_level * 0.8; // 0.0 à 0.8 pour éviter le magenta
-                    hsv_to_rgb(hue, 0.95, normalized_level.max(0.2))
-                }
-                "fire" => {
-                    if normalized_level < 0.3 {
-                        let t = normalized_level / 0.3;
-                        (t * 0.9, t * 0.1, 0.0)
-                    } else if normalized_level < 0.7 {
-                        let t = (normalized_level - 0.3) / 0.4;
-                        (0.9 + t * 0.1, 0.1 + t * 0.5, t * 0.1)
-                    } else {
-                        let t = (normalized_level - 0.7) / 0.3;
-                        (1.0, 0.6 + t * 0.4, 0.1 + t * 0.4)
-                    }
-                }
-                "ocean" => {
-                    if normalized_level < 0.4 {
-                        let t = normalized_level / 0.4;
-                        (0.0, t * 0.4, 0.3 + t * 0.5)
-                    } else {
-                        let t = (normalized_level - 0.4) / 0.6;
-                        (t * 0.3, 0.4 + t * 0.5, 0.8 + t * 0.2)
-                    }
-                }
-                "sunset" => {
-                    if normalized_level < 0.5 {
-                        let t = normalized_level / 0.5;
-                        (0.4 + t * 0.4, 0.1 + t * 0.2, 0.6 + t * 0.2)
-                    } else {
-                        let t = (normalized_level - 0.5) / 0.5;
-                        (0.8 + t * 0.2, 0.3 + t * 0.5, 0.8 - t * 0.6)
-                    }
-                }
-                "custom" => {
-                    let (r, g, b) = color_config.custom_color;
-                    let intensity = normalized_level.max(0.1);
-                    (r * intensity, g * intensity, b * intensity)
-                }
-                _ => hsv_to_rgb(0.3, 1.0, normalized_level.max(0.3)),
-            }
-        }
-    }
-
+    /// Calcule le niveau audio pondéré à partir du spectre
     fn calculate_audio_level(&mut self, spectrum: &[f32]) -> f32 {
         if spectrum.is_empty() {
             return 0.0;
         }
 
-        // Amélioration de l'analyse spectrale avec pondération logarithmique
-        let spectrum_len = spectrum.len().min(64);
-        let bass_end = (spectrum_len * 12 / 64).max(1);
-        let mid_end = (spectrum_len * 32 / 64).max(bass_end + 1);
+        // Pondération par fréquence (bass plus fort, aigus plus faibles)
+        let bass_weight = 0.6;   // 0-8 (graves)
+        let mid_weight = 0.3;    // 8-24 (médiums)
+        let high_weight = 0.1;   // 24+ (aigus)
+
+        let spectrum_len = spectrum.len();
+        let bass_end = (spectrum_len / 8).min(spectrum_len);
+        let mid_end = (spectrum_len * 3 / 8).min(spectrum_len);
 
         let bass_level = if bass_end > 0 {
             spectrum[..bass_end].iter().sum::<f32>() / bass_end as f32
@@ -145,173 +143,361 @@ impl Applaudimetre {
         };
 
         let high_level = if spectrum_len > mid_end {
-            spectrum[mid_end..spectrum_len].iter().sum::<f32>() / (spectrum_len - mid_end) as f32
+            spectrum[mid_end..].iter().sum::<f32>() / (spectrum_len - mid_end) as f32
         } else {
             0.0
         };
 
-        // Pondération améliorée pour l'applaudissement
-        let raw_level = (bass_level * 0.6 + mid_level * 0.3 + high_level * 0.1) * self.sensitivity;
+        let raw_level = (bass_level * bass_weight + mid_level * mid_weight + high_level * high_weight)
+            * self.sensitivity;
 
-        // Gate de bruit adaptatif
-        if raw_level < self.noise_gate {
-            return 0.0;
-        }
-
-        // Auto-gain avec hystérésis
+        // Auto-gain adaptatif
         if raw_level > 0.01 {
             let avg_recent = self.peak_history.iter().sum::<f32>() / self.peak_history.len() as f32;
-            let gain_adjustment = 0.005; // Plus lent pour plus de stabilité
 
-            if avg_recent < 0.15 && self.auto_gain < 2.5 {
-                self.auto_gain += gain_adjustment;
-            } else if avg_recent > 0.85 && self.auto_gain > 0.3 {
-                self.auto_gain -= gain_adjustment;
-            }
-
-            // Ajustement du seuil de bruit basé sur l'activité
-            if avg_recent > 0.1 {
-                self.noise_gate = (self.noise_gate * 0.99 + avg_recent * 0.05 * 0.01).min(0.05);
+            if avg_recent < 0.15 {
+                self.auto_gain = (self.auto_gain + 0.008).min(3.0);
+            } else if avg_recent > 0.85 {
+                self.auto_gain = (self.auto_gain - 0.008).max(0.3);
             }
         }
 
-        // Courbe de réponse logarithmique pour les applaudissements
-        let processed_level = (raw_level * self.auto_gain).powf(0.65);
-        processed_level.min(1.0)
+        let final_level = (raw_level * self.auto_gain).powf(0.65);
+        final_level.clamp(0.0, 1.0)
     }
 
-    fn update_sparkles(&mut self) {
-        // Mise à jour des étincelles existantes avec physique améliorée
-        self.peak_sparkles.retain_mut(|sparkle| {
-            sparkle.life -= 0.025;
-            sparkle.x += sparkle.velocity_x;
-            sparkle.y += sparkle.velocity_y;
-            sparkle.velocity_x *= 0.98; // Friction
-            sparkle.velocity_y -= 0.1; // Gravité
-            sparkle.size *= 0.995; // Rétrécissement progressif
+    /// Obtient la couleur selon le niveau et le mode couleur
+    fn get_color_for_level(&self, level: f32, is_max_indicator: bool) -> (f32, f32, f32) {
+        let color_config = get_color_config();
 
-            // Effet de scintillement
-            sparkle.brightness = (sparkle.life / sparkle.max_life) *
-                (0.7 + 0.3 * (self.animation_time * 0.3 + sparkle.x * 0.1).sin());
-
-            sparkle.life > 0.0 && sparkle.x >= 0.0 && sparkle.x < 128.0
-        });
-
-        // Génération de nouvelles étincelles avec contrôle de densité
-        if self.current_level > 0.25 && rand() < (0.3 + self.current_level * 0.4) {
-            let sparkle_count = (1.0 + self.current_level * 4.0) as usize;
-            let max_y = 127.0 - self.max_level * 127.0;
-
-            for _ in 0..sparkle_count.min(8) {
-                if self.peak_sparkles.len() < 50 { // Limite pour les performances
-                    let angle = rand() * std::f32::consts::PI * 2.0;
-                    let speed = 0.5 + rand() * 1.5;
-
-                    self.peak_sparkles.push(PeakSparkle {
-                        x: 64.0 + (rand() - 0.5) * 30.0,
-                        y: max_y + (rand() - 0.5) * 8.0,
-                        life: 0.6 + rand() * 0.8,
-                        max_life: 1.0,
-                        brightness: 0.8 + rand() * 0.2,
-                        color: self.get_color_for_level(self.current_level, false),
-                        velocity_x: angle.cos() * speed * (rand() - 0.5),
-                        velocity_y: -speed * (0.5 + rand() * 0.5),
-                        size: 0.8 + rand() * 0.4,
-                    });
+        if is_max_indicator {
+            // Couleur pour l'indicateur de pic
+            match color_config.mode.as_str() {
+                "rainbow" => {
+                    let hue = (self.animation_time * 0.01) % 1.0;
+                    let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
+                    (r * 1.2, g * 1.2, b * 1.2)
+                }
+                "fire" => (1.0, 0.9, 0.1),
+                "ocean" => (0.1, 0.9, 1.0),
+                "sunset" => (1.0, 0.5, 0.0),
+                "custom" => {
+                    let (r, g, b) = color_config.custom_color;
+                    (r * 1.5, g * 1.5, b * 1.5)
+                }
+                _ => (1.0, 1.0, 1.0),
+            }
+        } else {
+            // Couleur progressive selon le niveau
+            match color_config.mode.as_str() {
+                "rainbow" => {
+                    if level < 0.2 {
+                        let t = level * 5.0;
+                        (0.0, t * 0.4, 0.8 + t * 0.2)
+                    } else if level < 0.4 {
+                        let t = (level - 0.2) * 5.0;
+                        (0.0, 0.4 + t * 0.6, 1.0 - t * 0.5)
+                    } else if level < 0.7 {
+                        let t = (level - 0.4) / 0.3;
+                        (t * 0.8, 1.0, 0.5 - t * 0.5)
+                    } else {
+                        let t = (level - 0.7) / 0.3;
+                        (0.8 + t * 0.2, 1.0 - t * 0.3, t * 0.2)
+                    }
+                }
+                "fire" => {
+                    if level < 0.3 {
+                        let t = level / 0.3;
+                        (t * 0.9, t * 0.1, 0.0)
+                    } else if level < 0.6 {
+                        let t = (level - 0.3) / 0.3;
+                        (0.9, 0.1 + t * 0.5, 0.0)
+                    } else {
+                        let t = (level - 0.6) / 0.4;
+                        (0.9 + t * 0.1, 0.6 + t * 0.4, t * 0.4)
+                    }
+                }
+                "ocean" => {
+                    if level < 0.4 {
+                        let t = level / 0.4;
+                        (0.0, t * 0.2, 0.3 + t * 0.5)
+                    } else {
+                        let t = (level - 0.4) / 0.6;
+                        (t * 0.3, 0.2 + t * 0.6, 0.8 + t * 0.2)
+                    }
+                }
+                "sunset" => {
+                    if level < 0.5 {
+                        let t = level * 2.0;
+                        (0.4 + t * 0.3, 0.05 + t * 0.15, 0.6 + t * 0.2)
+                    } else {
+                        let t = (level - 0.5) * 2.0;
+                        (0.7 + t * 0.3, 0.2 + t * 0.6, 0.8 - t * 0.6)
+                    }
+                }
+                "custom" => {
+                    let (r, g, b) = color_config.custom_color;
+                    let intensity = (level * 0.8 + 0.2).min(1.0);
+                    (r * intensity, g * intensity, b * intensity)
+                }
+                _ => {
+                    let intensity = level.max(0.1);
+                    (0.2 + intensity * 0.8, 0.8 * intensity, 0.6 + intensity * 0.4)
                 }
             }
         }
     }
 
-    fn render_bar(&self, frame: &mut [u8]) {
-        let bar_left = 38;
-        let bar_right = 90;
-        let bar_center = (bar_left + bar_right) / 2;
+    /// Met à jour les particules d'éclat
+    fn update_sparkles(&mut self) {
+        // Mise à jour des particules existantes
+        self.peak_sparkles.retain_mut(|sparkle| {
+            sparkle.update();
+            sparkle.is_alive()
+        });
 
-        // FIX: Utilisation de chunks_mut au lieu de par_chunks_mut
-        frame.chunks_mut(3).enumerate().for_each(|(i, pixel)| {
+        // Création de nouvelles particules lors de pics
+        if self.current_level > 0.25 && rand() < (self.current_level * 0.6) {
+            let num_sparkles = 1 + (self.current_level * 4.0) as usize;
+            let bar_center = (self.bar_left + self.bar_right) as f32 / 2.0;
+            let peak_y = 127.0 - self.max_level * 127.0;
+
+            for _ in 0..num_sparkles {
+                let x = bar_center + (rand() - 0.5) * (self.bar_width as f32 * 1.5);
+                let y = peak_y + (rand() - 0.5) * 20.0;
+                let color = self.get_color_for_level(self.current_level, false);
+
+                self.peak_sparkles.push(PeakSparkle::new(x, y, color));
+            }
+        }
+    }
+
+    /// Dessine les graduations sur les côtés
+    fn draw_graduations(&self, frame: &mut [u8]) {
+        if !self.show_graduations {
+            return;
+        }
+
+        let grad_positions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+
+        for &grad_level in &grad_positions {
+            let grad_y = (127.0 - grad_level * 127.0) as usize;
+            let intensity = if grad_level == 1.0 {
+                0.8
+            } else if grad_level % 0.2 < 0.05 {
+                0.6
+            } else {
+                0.3
+            };
+
+            let brightness = (intensity * self.background_pulse * 200.0) as u8;
+
+            // Graduations à gauche et à droite
+            for grad_x in [self.bar_left.saturating_sub(2), self.bar_right + 1] {
+                if grad_x < 128 && grad_y < 128 {
+                    let idx = (grad_y * 128 + grad_x) * 3;
+                    if idx + 2 < frame.len() {
+                        frame[idx] = brightness;
+                        frame[idx + 1] = brightness;
+                        frame[idx + 2] = brightness;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Dessine la traînée historique
+    fn draw_history_trail(&self, frame: &mut [u8]) {
+        if !self.show_history_trail {
+            return;
+        }
+
+        for (i, &historical_level) in self.level_history.iter().enumerate() {
+            if historical_level < 0.05 {
+                continue;
+            }
+
+            let x = self.bar_left + i;
+            if x >= self.bar_right {
+                continue;
+            }
+
+            let bar_height = (historical_level * 127.0) as usize;
+
+            for y in (127 - bar_height)..128 {
+                let y_normalized = (127 - y) as f32 / 127.0;
+                let trail_intensity = 0.15 + (historical_level / self.current_level.max(0.1)) * 0.25;
+                let (r, g, b) = self.get_color_for_level(y_normalized, false);
+
+                let idx = (y * 128 + x) * 3;
+                if idx + 2 < frame.len() {
+                    frame[idx] = (r * trail_intensity * 255.0) as u8;
+                    frame[idx + 1] = (g * trail_intensity * 255.0) as u8;
+                    frame[idx + 2] = (b * trail_intensity * 255.0) as u8;
+                }
+            }
+        }
+    }
+
+    /// Dessine la barre principale
+    fn draw_main_bar(&self, frame: &mut [u8]) {
+        let bar_height = (self.current_level * 127.0) as usize;
+        let bar_center = (self.bar_left + self.bar_right) as f32 / 2.0;
+
+        frame.par_chunks_mut(3).enumerate().for_each(|(i, pixel)| {
             let x = i % 128;
             let y = i / 128;
 
-            if x >= bar_left && x < bar_right {
-                let y_norm = (127 - y) as f32 / 127.0;
-                let bar_height = self.current_level.min(1.0);
+            if x >= self.bar_left && x < self.bar_right && y >= (127 - bar_height) {
+                let y_normalized = (127 - y) as f32 / 127.0;
 
-                // Effet de traînée optimisé
-                if y_norm <= bar_height && bar_height > 0.02 {
-                    let level_intensity = (y_norm / bar_height.max(0.01)).powf(0.8);
+                // Effet de profondeur selon la distance du centre
+                let distance_from_center = ((x as f32 - bar_center) / (self.bar_width as f32 / 2.0)).abs();
+                let center_glow = (1.0 - distance_from_center * 0.7).max(0.3);
 
-                    // Effet de brillance au centre
-                    let center_dist = ((x - bar_center) as f32 / ((bar_right - bar_left) / 2) as f32).abs();
-                    let center_glow = (1.0 - center_dist).max(0.0).powf(1.5);
+                // Pulsation selon le niveau audio
+                let pulse = 1.0 + self.current_level * (self.animation_time * 0.08).sin() * 0.15;
 
-                    let brightness = 0.6 + level_intensity * 0.3 + center_glow * 0.4;
-                    let (r, g, b) = self.get_color_for_level(level_intensity, false);
+                let brightness = (0.6 + y_normalized * 0.4) * center_glow * pulse;
+                let (r, g, b) = self.get_color_for_level(y_normalized, false);
 
-                    // Pulsation dynamique
-                    let pulse = 1.0 + self.current_level * 0.15 * (self.animation_time * 0.08).sin();
-
-                    pixel[0] = (r * brightness * pulse * 255.0).min(255.0) as u8;
-                    pixel[1] = (g * brightness * pulse * 255.0).min(255.0) as u8;
-                    pixel[2] = (b * brightness * pulse * 255.0).min(255.0) as u8;
-                }
-
-                // Indicateur de maximum amélioré
-                let max_y = (127.0 - self.max_level * 127.0) as usize;
-                if y >= max_y.saturating_sub(1) && y <= max_y.saturating_add(1) && self.max_level > 0.03 {
-                    let (r, g, b) = self.get_color_for_level(self.max_level, true);
-
-                    let blink_factor = if self.max_hold_time < 5.0 {
-                        0.85 + 0.15 * (self.animation_time * 0.2).sin()
-                    } else {
-                        0.5 + 0.3 * (self.max_hold_time * 1.5).sin().abs()
-                    };
-
-                    pixel[0] = (r * blink_factor * 255.0) as u8;
-                    pixel[1] = (g * blink_factor * 255.0) as u8;
-                    pixel[2] = (b * blink_factor * 255.0) as u8;
-                }
-            }
-
-            // Cadre avec lueur adaptative
-            let is_frame = ((x == bar_left - 1 || x == bar_right) && y < 128) ||
-                          ((y == 0 || y == 127) && x >= bar_left - 1 && x <= bar_right);
-
-            if is_frame {
-                let glow_intensity = (60.0 + self.current_level * 40.0) * self.background_pulse;
-                pixel[0] = glow_intensity as u8;
-                pixel[1] = glow_intensity as u8;
-                pixel[2] = glow_intensity as u8;
+                pixel[0] = (r * brightness * 255.0).min(255.0) as u8;
+                pixel[1] = (g * brightness * 255.0).min(255.0) as u8;
+                pixel[2] = (b * brightness * 255.0).min(255.0) as u8;
             }
         });
     }
 
-    fn render_sparkles(&self, frame: &mut [u8]) {
+    /// Dessine l'indicateur de pic maximum
+    fn draw_peak_indicator(&self, frame: &mut [u8]) {
+        if !self.show_peak_hold || self.max_level < 0.05 {
+            return;
+        }
+
+        let max_y = (127.0 - self.max_level * 127.0) as usize;
+        let (r, g, b) = self.get_color_for_level(self.max_level, true);
+
+        // Clignotement selon le temps de hold
+        let blink_factor = if self.max_hold_time < 3.0 {
+            0.9 + 0.1 * (self.max_hold_time * 10.0).sin()
+        } else {
+            0.5 + 0.5 * (self.max_hold_time * 3.0).sin().abs()
+        };
+
+        // Dessiner sur plusieurs lignes pour plus de visibilité
+        for dy in -1i32..=1i32 {
+            let y = (max_y as i32 + dy) as usize;
+            if y >= 128 {
+                continue;
+            }
+
+            let line_intensity = if dy == 0 { 1.0 } else { 0.7 };
+
+            for x in self.bar_left..self.bar_right {
+                let idx = (y * 128 + x) * 3;
+                if idx + 2 < frame.len() {
+                    let brightness = blink_factor * line_intensity;
+                    frame[idx] = (r * brightness * 255.0) as u8;
+                    frame[idx + 1] = (g * brightness * 255.0) as u8;
+                    frame[idx + 2] = (b * brightness * 255.0) as u8;
+                }
+            }
+        }
+    }
+
+    /// Dessine les particules d'éclat
+    fn draw_sparkles(&self, frame: &mut [u8]) {
+        if !self.show_sparkles {
+            return;
+        }
+
         for sparkle in &self.peak_sparkles {
-            let base_x = sparkle.x as i32;
-            let base_y = sparkle.y as i32;
-            let size = sparkle.size as i32;
+            let x = sparkle.x as i32;
+            let y = sparkle.y as i32;
 
-            // Rendu avec anti-aliasing simple pour les étincelles
-            for dy in -size..=size {
-                for dx in -size..=size {
-                    let x = base_x + dx;
-                    let y = base_y + dy;
+            if x < 0 || x >= 128 || y < 0 || y >= 128 {
+                continue;
+            }
 
-                    if x >= 0 && x < 128 && y >= 0 && y < 128 {
-                        let distance = ((dx * dx + dy * dy) as f32).sqrt();
-                        if distance <= sparkle.size {
-                            let idx = ((y * 128 + x) * 3) as usize;
-                            if idx + 2 < frame.len() {
-                                let falloff = (1.0 - distance / sparkle.size).max(0.0);
-                                let intensity = sparkle.brightness * falloff * 255.0;
+            let alpha = sparkle.get_alpha();
+            let intensity = sparkle.brightness * alpha;
 
-                                frame[idx] = frame[idx].saturating_add((sparkle.color.0 * intensity) as u8);
-                                frame[idx + 1] = frame[idx + 1].saturating_add((sparkle.color.1 * intensity) as u8);
-                                frame[idx + 2] = frame[idx + 2].saturating_add((sparkle.color.2 * intensity) as u8);
-                            }
+            // Dessiner la particule avec sa taille
+            let size = (sparkle.size * alpha) as i32;
+            for dx in -size..=size {
+                for dy in -size..=size {
+                    let px = x + dx;
+                    let py = y + dy;
+
+                    if px < 0 || px >= 128 || py < 0 || py >= 128 {
+                        continue;
+                    }
+
+                    let distance = ((dx * dx + dy * dy) as f32).sqrt();
+                    if distance <= sparkle.size * alpha {
+                        let idx = (py as usize * 128 + px as usize) * 3;
+                        if idx + 2 < frame.len() {
+                            let fade = (1.0 - distance / (sparkle.size * alpha)).max(0.0);
+                            let final_intensity = intensity * fade;
+
+                            let new_r = (sparkle.color.0 * final_intensity * 255.0) as u8;
+                            let new_g = (sparkle.color.1 * final_intensity * 255.0) as u8;
+                            let new_b = (sparkle.color.2 * final_intensity * 255.0) as u8;
+
+                            frame[idx] = frame[idx].saturating_add(new_r);
+                            frame[idx + 1] = frame[idx + 1].saturating_add(new_g);
+                            frame[idx + 2] = frame[idx + 2].saturating_add(new_b);
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// Dessine le cadre autour de la barre
+    fn draw_frame(&self, frame: &mut [u8]) {
+        let glow_intensity = (100.0 + self.current_level * 80.0) as u8;
+
+        // Cadre horizontal (haut et bas)
+        for x in (self.bar_left.saturating_sub(1))..=(self.bar_right) {
+            if x < 128 {
+                // Ligne du haut
+                let idx_top = x * 3;
+                if idx_top + 2 < frame.len() {
+                    frame[idx_top] = glow_intensity;
+                    frame[idx_top + 1] = glow_intensity;
+                    frame[idx_top + 2] = glow_intensity;
+                }
+
+                // Ligne du bas
+                let idx_bottom = (127 * 128 + x) * 3;
+                if idx_bottom + 2 < frame.len() {
+                    frame[idx_bottom] = glow_intensity;
+                    frame[idx_bottom + 1] = glow_intensity;
+                    frame[idx_bottom + 2] = glow_intensity;
+                }
+            }
+        }
+
+        // Cadre vertical (gauche et droite)
+        for y in 0..128 {
+            // Ligne de gauche
+            if self.bar_left > 0 {
+                let idx_left = (y * 128 + self.bar_left - 1) * 3;
+                if idx_left + 2 < frame.len() {
+                    frame[idx_left] = glow_intensity;
+                    frame[idx_left + 1] = glow_intensity;
+                    frame[idx_left + 2] = glow_intensity;
+                }
+            }
+
+            // Ligne de droite
+            if self.bar_right < 128 {
+                let idx_right = (y * 128 + self.bar_right) * 3;
+                if idx_right + 2 < frame.len() {
+                    frame[idx_right] = glow_intensity;
+                    frame[idx_right + 1] = glow_intensity;
+                    frame[idx_right + 2] = glow_intensity;
                 }
             }
         }
@@ -321,80 +507,69 @@ impl Applaudimetre {
 impl Effect for Applaudimetre {
     fn render(&mut self, spectrum: &[f32], frame: &mut [u8]) {
         // Calcul du niveau audio
-        let level = self.calculate_audio_level(spectrum);
+        let raw_level = self.calculate_audio_level(spectrum);
 
-        // Lissage adaptatif optimisé
-        let smoothing = if level > self.smoothed_level { 0.3 } else { 0.88 };
-        self.smoothed_level = self.smoothed_level * smoothing + level * (1.0 - smoothing);
+        // Lissage adaptatif
+        let smoothing = if raw_level > self.smoothed_level {
+            0.3 // Montée rapide
+        } else {
+            0.88 // Descente lente
+        };
+
+        self.smoothed_level = self.smoothed_level * smoothing + raw_level * (1.0 - smoothing);
         self.current_level = self.smoothed_level;
 
-        // Mise à jour de l'historique (rotation efficace)
-        if !self.level_history.is_empty() {
-            self.level_history.rotate_left(1);
-            let len = self.level_history.len();
-            if len > 0 {
-                self.level_history[len - 1] = self.current_level;
-            }
-        }
+        // Mise à jour des historiques
+        self.level_history.remove(0);
+        self.level_history.push(self.current_level);
 
-        // Gestion du pic avec decay amélioré
-        if !self.peak_history.is_empty() {
-            self.peak_history.rotate_left(1);
-            let len = self.peak_history.len();
-            if len > 0 {
-                self.peak_history[len - 1] = self.current_level;
-            }
-        }
+        self.peak_history.remove(0);
+        self.peak_history.push(self.current_level);
 
-        let recent_max = self.peak_history.iter().fold(0.0f32, |acc, &x| acc.max(x));
+        // Gestion du pic maximum
+        let recent_max = self.peak_history.iter().fold(0.0f32, |a, &b| a.max(b));
 
         if self.current_level > self.max_level {
             self.max_level = self.current_level;
             self.max_hold_time = 0.0;
-            self.decay_timer = 0.0;
         } else {
-            self.max_hold_time += 1.0 / 60.0;
+            self.max_hold_time += 1.0 / 60.0; // Assume 60 FPS
+
             if self.max_hold_time >= 3.0 {
-                self.decay_timer += 1.0 / 60.0;
-                let decay_rate = 0.006 + self.decay_timer * 0.001; // Décroissance progressive
-                self.max_level = (self.max_level - decay_rate).max(recent_max);
+                self.max_level = (self.max_level - self.decay_rate).max(recent_max);
                 if self.max_level <= recent_max {
                     self.max_hold_time = 0.0;
-                    self.decay_timer = 0.0;
                 }
             }
         }
 
-        // Mise à jour des animations
-        self.animation_time += 0.8 + self.current_level * 1.5;
-        self.background_pulse = 0.85 + 0.15 * (self.animation_time * 0.04).sin();
+        // Mise à jour de l'animation
+        self.animation_time += 1.0 + self.current_level * 3.0;
+        self.background_pulse = (self.animation_time * 0.04).sin() * 0.2 + 0.8;
+
+        // Mise à jour des particules
         self.update_sparkles();
 
-        // Statistiques de débogage (optimisées)
-        self.frame_count += 1;
-        if self.frame_count % 60 == 0 {
-            println!(
-                "👏 [Applaudimètre] L:{:.3} M:{:.3} H:{:.1}s G:{:.2} S:{} N:{:.3}",
-                self.current_level, self.max_level, self.max_hold_time,
-                self.auto_gain, self.peak_sparkles.len(), self.noise_gate
-            );
-        }
-
-        // Rendu
+        // Effacer le frame
         frame.fill(0);
-        self.render_bar(frame);
-        self.render_sparkles(frame);
+
+        // Rendu des éléments (ordre important pour la superposition)
+        self.draw_graduations(frame);
+        self.draw_history_trail(frame);
+        self.draw_main_bar(frame);
+        self.draw_peak_indicator(frame);
+        self.draw_sparkles(frame);
+        self.draw_frame(frame);
     }
 
-    fn set_color_mode(&mut self, mode: &str) {
-        println!("   Applaudimètre: color mode set to '{}'", mode);
+    fn set_color_mode(&mut self, _mode: &str) {
+        // La configuration couleur est gérée globalement
+        // L'effet s'adapte automatiquement via get_color_config()
     }
 
-    fn set_custom_color(&mut self, r: f32, g: f32, b: f32) {
-        println!(
-            "   Applaudimètre: custom color set to ({:.2}, {:.2}, {:.2})",
-            r, g, b
-        );
+    fn set_custom_color(&mut self, _r: f32, _g: f32, _b: f32) {
+        // La configuration couleur est gérée globalement
+        // L'effet s'adapte automatiquement via get_color_config()
     }
 
     fn name(&self) -> &'static str {
@@ -402,7 +577,7 @@ impl Effect for Applaudimetre {
     }
 
     fn description(&self) -> &'static str {
-        "Mesureur d'applaudissements avec indicateur de pic et effets visuels"
+        "Visualisateur de niveau sonore avec indicateur de pic, traînée historique et effets de particules"
     }
 
     fn reset(&mut self) {
@@ -412,13 +587,10 @@ impl Effect for Applaudimetre {
         self.smoothed_level = 0.0;
         self.peak_history.fill(0.0);
         self.level_history.fill(0.0);
-        self.peak_sparkles.clear();
         self.animation_time = 0.0;
-        self.auto_gain = 1.0;
         self.background_pulse = 0.0;
-        self.frame_count = 0;
-        self.decay_timer = 0.0;
-        self.noise_gate = 0.02;
+        self.peak_sparkles.clear();
+        self.auto_gain = 1.0;
     }
 
     fn supports_transitions(&self) -> bool {

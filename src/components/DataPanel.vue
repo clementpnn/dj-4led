@@ -14,7 +14,7 @@
 			<div class="metric-group">
 				<div class="metric-item">
 					<span class="metric-label">FPS</span>
-					<span class="metric-value">{{ frames.stats.fps || 0 }}</span>
+					<span class="metric-value">{{ framesStore.stats.fps || 0 }}</span>
 				</div>
 				<div class="metric-item">
 					<span class="metric-label">Stream</span>
@@ -24,7 +24,7 @@
 				</div>
 				<div class="metric-item">
 					<span class="metric-label">Uptime</span>
-					<span class="metric-value">{{ system.systemUptime }}</span>
+					<span class="metric-value">{{ systemStore.systemUptime }}</span>
 				</div>
 			</div>
 		</div>
@@ -33,32 +33,32 @@
 		<div class="data-section">
 			<div class="section-header">
 				<span class="section-title">Audio</span>
-				<div class="section-indicator" :class="{ active: audio.state.isCapturing }"></div>
+				<div class="section-indicator" :class="{ active: audioStore.state.isCapturing }"></div>
 			</div>
 			<div class="data-grid">
 				<div class="data-item">
 					<span class="data-label">Status</span>
-					<span class="data-value">{{ audio.state.isCapturing ? 'Capturing' : 'Stopped' }}</span>
+					<span class="data-value">{{ audioStore.state.isCapturing ? 'Capturing' : 'Stopped' }}</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Gain</span>
-					<span class="data-value">{{ audio.state.currentGain?.toFixed(1) || '1.0' }}x</span>
+					<span class="data-value">{{ audioStore.state.currentGain?.toFixed(1) || '1.0' }}x</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Devices</span>
-					<span class="data-value">{{ audio.state.devices.length || 0 }}</span>
+					<span class="data-value">{{ audioStore.state.devices.length || 0 }}</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Spectrum</span>
-					<span class="data-value">{{ audio.state.spectrum?.length || 0 }} bands</span>
+					<span class="data-value">{{ audioStore.state.spectrum?.length || 0 }} bands</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Peak</span>
-					<span class="data-value">{{ Math.round((audio.spectrumPeak || 0) * 100) }}%</span>
+					<span class="data-value">{{ Math.round((audioStore.spectrumPeak || 0) * 100) }}%</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">RMS</span>
-					<span class="data-value">{{ Math.round((audio.spectrumRMS || 0) * 100) }}%</span>
+					<span class="data-value">{{ Math.round((audioStore.spectrumRMS || 0) * 100) }}%</span>
 				</div>
 			</div>
 		</div>
@@ -67,32 +67,32 @@
 		<div class="data-section">
 			<div class="section-header">
 				<span class="section-title">LED</span>
-				<div class="section-indicator" :class="{ active: led.isRunning }"></div>
+				<div class="section-indicator" :class="{ active: ledStore.isRunning }"></div>
 			</div>
 			<div class="data-grid">
 				<div class="data-item">
 					<span class="data-label">Status</span>
-					<span class="data-value">{{ led.isRunning ? 'Running' : 'Stopped' }}</span>
+					<span class="data-value">{{ ledStore.isRunning ? 'Running' : 'Stopped' }}</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Mode</span>
-					<span class="data-value">{{ led.currentMode }}</span>
+					<span class="data-value">{{ ledStore.currentMode }}</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Brightness</span>
-					<span class="data-value">{{ Math.round(led.brightness * 100) }}%</span>
+					<span class="data-value">{{ Math.round(ledStore.brightness * 100) }}%</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Controllers</span>
-					<span class="data-value">{{ led.controllerCount }}</span>
+					<span class="data-value">{{ ledStore.controllerCount }}</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Frame Rate</span>
-					<span class="data-value">{{ frames.stats.fps || 0 }} fps</span>
+					<span class="data-value">{{ framesStore.stats.fps || 0 }} fps</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Frame Size</span>
-					<span class="data-value">{{ led.matrixSize }}</span>
+					<span class="data-value">{{ ledStore.matrixSize }}</span>
 				</div>
 			</div>
 		</div>
@@ -106,19 +106,19 @@
 			<div class="data-grid">
 				<div class="data-item">
 					<span class="data-label">Current</span>
-					<span class="data-value">{{ effects.currentEffectName }}</span>
+					<span class="data-value">{{ effectsStore.currentEffectName }}</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Available</span>
-					<span class="data-value">{{ effects.availableEffects.length }}</span>
+					<span class="data-value">{{ effectsStore.availableEffects.length }}</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Color Mode</span>
-					<span class="data-value">{{ colors.currentModeInfo?.label || colors.currentMode }}</span>
+					<span class="data-value">{{ colorsStore.currentModeInfo?.label || colorsStore.currentMode }}</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Transitioning</span>
-					<span class="data-value">{{ effects.isTransitioning ? 'Yes' : 'No' }}</span>
+					<span class="data-value">{{ effectsStore.isTransitioning ? 'Yes' : 'No' }}</span>
 				</div>
 			</div>
 		</div>
@@ -127,7 +127,7 @@
 		<div class="data-section">
 			<div class="section-header">
 				<span class="section-title">System</span>
-				<div class="section-indicator" :class="{ active: system.isHealthy }"></div>
+				<div class="section-indicator" :class="{ active: systemStore.isHealthy }"></div>
 			</div>
 			<div class="data-grid">
 				<div class="data-item">
@@ -136,15 +136,15 @@
 				</div>
 				<div class="data-item">
 					<span class="data-label">Health</span>
-					<span class="data-value">{{ system.health.status }}</span>
+					<span class="data-value">{{ systemStore.health.status }}</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Score</span>
-					<span class="data-value">{{ system.health.score }}/100</span>
+					<span class="data-value">{{ systemStore.health.score }}/100</span>
 				</div>
 				<div class="data-item">
 					<span class="data-label">Monitoring</span>
-					<span class="data-value">{{ system.loading ? 'Active' : 'Inactive' }}</span>
+					<span class="data-value">{{ systemStore.loading ? 'Active' : 'Inactive' }}</span>
 				</div>
 			</div>
 		</div>
@@ -153,12 +153,19 @@
 
 <script setup lang="ts">
 	import { computed } from 'vue';
-	import { useAudio } from '../composables/useAudio';
-	import { useColors } from '../composables/useColors';
-	import { useEffects } from '../composables/useEffects';
-	import { useFrames } from '../composables/useFrames';
-	import { useLED } from '../composables/useLED';
-	import { useSystem } from '../composables/useSystem';
+
+	import { useAudio } from '@/composables/useAudio';
+	import { useColors } from '@/composables/useColors';
+	import { useEffects } from '@/composables/useEffects';
+	import { useFrames } from '@/composables/useFrames';
+	import { useLED } from '@/composables/useLED';
+	import { useSystem } from '@/composables/useSystem';
+	import { useAudioStore } from '@/stores/audio';
+	import { useColorsStore } from '@/stores/colors';
+	import { useEffectsStore } from '@/stores/effects';
+	import { useFramesStore } from '@/stores/frames';
+	import { useLEDStore } from '@/stores/led';
+	import { useSystemStore } from '@/stores/system';
 
 	// Props pour les données de connexion qui peuvent venir d'ailleurs
 	interface Props {
@@ -169,17 +176,25 @@
 		isConnected: true,
 	});
 
-	// Composables
-	const audio = useAudio();
-	const effects = useEffects();
-	const colors = useColors();
-	const led = useLED();
-	const frames = useFrames();
-	const system = useSystem();
+	// Stores - pour récupérer les données
+	const audioStore = useAudioStore();
+	const effectsStore = useEffectsStore();
+	const colorsStore = useColorsStore();
+	const ledStore = useLEDStore();
+	const framesStore = useFramesStore();
+	const systemStore = useSystemStore();
 
-	// Computed properties
+	// Composables - pour la logique et les actions uniquement
+	const {} = useAudio(); // Initialise les listeners et la logique
+	const {} = useEffects();
+	const {} = useColors();
+	const {} = useLED();
+	const {} = useFrames();
+	const {} = useSystem();
+
+	// Computed properties basées sur les stores
 	const isStreaming = computed(() => {
-		return audio.state.isCapturing && led.isRunning;
+		return audioStore.state.isCapturing && ledStore.isRunning;
 	});
 
 	const connectionStatus = computed(() => {

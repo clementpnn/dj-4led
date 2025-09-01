@@ -1,11 +1,11 @@
-import { useAudioStore } from './audio';
-import { useColorsStore } from './colors';
-import { useEffectsStore } from './effects';
-import { useFramesStore } from './frames';
-import { useLEDStore } from './led';
-import { useLogsStore } from './logs';
-import { usePresetsStore } from './presets';
-import { useSystemStore } from './system';
+import { useAudioStore } from '@/stores/audio';
+import { useColorsStore } from '@/stores/colors';
+import { useEffectsStore } from '@/stores/effects';
+import { useFramesStore } from '@/stores/frames';
+import { useLEDStore } from '@/stores/led';
+import { useLogsStore } from '@/stores/logs';
+import { usePresetsStore } from '@/stores/presets';
+import { useSystemStore } from '@/stores/system';
 
 // Export individual stores
 export {
@@ -19,7 +19,7 @@ export {
 	useSystemStore,
 };
 
-// Utility function to reset all stores
+// Utility function to reset all stores using Pinia's $reset
 export const useResetAllStores = () => {
 	const resetAll = () => {
 		try {
@@ -34,7 +34,14 @@ export const useResetAllStores = () => {
 				useLogsStore(),
 			];
 
-			stores.forEach((store) => store.reset());
+			stores.forEach((store) => {
+				if (typeof store.$reset === 'function') {
+					store.$reset();
+				} else {
+					console.warn('Store does not have $reset method:', store);
+				}
+			});
+
 			console.log('🔄 All stores reset successfully');
 		} catch (error) {
 			console.error('❌ Error resetting stores:', error);

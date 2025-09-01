@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
-import { computed, readonly, ref } from 'vue';
-import { EFFECTS } from '../config';
-import type { Effect, EffectInfo, EffectState } from '../types';
+import { computed, ref, watch } from 'vue';
+
+import { EFFECTS } from '@/config';
+import type { Effect, EffectInfo, EffectState } from '@/types';
 
 export const useEffectsStore = defineStore('effects', () => {
 	// ===== STATE =====
@@ -10,96 +11,142 @@ export const useEffectsStore = defineStore('effects', () => {
 	const effectInfo = ref<EffectInfo | null>(null);
 	const loading = ref(false);
 
-	// ===== GETTERS =====
-	const currentEffectName = computed(() => currentEffect.value?.name || 'None');
-	const isTransitioning = computed(() => currentEffect.value?.transitioning || false);
-	const transitionProgress = computed(() => currentEffect.value?.transition_progress || 0);
-
-	const effectsByCategory = computed(() => {
-		return availableEffects.value.reduce(
-			(categories, effect) => {
-				const category = effect.category || 'other';
-				if (!categories[category]) {
-					categories[category] = [];
-				}
-				categories[category].push(effect);
-				return categories;
-			},
-			{} as Record<string, Effect[]>
-		);
+	// Force reactivity with watchers
+	watch(currentEffect, (newEffect) => {
+		console.log(`🎇 [EFFECTS_STORE] Current effect changed:`, newEffect);
 	});
 
-	const getEffectById = computed(() => (id: number) => availableEffects.value.find((effect) => effect.id === id));
+	watch(availableEffects, (newEffects) => {
+		console.log(`🎇 [EFFECTS_STORE] Available effects updated: ${newEffects.length} effects`);
+	});
+
+	// ===== GETTERS =====
+	const currentEffectName = computed(() => {
+		return currentEffect.value?.name || 'None';
+	});
+
+	const isTransitioning = computed(() => {
+		return currentEffect.value?.transitioning || false;
+	});
+
+	const transitionProgress = computed(() => {
+		return currentEffect.value?.transition_progress || 0;
+	});
+
+	const getEffectById = computed(() => (id: number) => {
+		return availableEffects.value.find((effect) => effect.id === id);
+	});
+
+	const getEffectByName = computed(() => (name: string) => {
+		return availableEffects.value.find((effect) => effect.name === name);
+	});
 
 	// ===== ACTIONS =====
 	const setAvailableEffects = (effects: Effect[]) => {
-		availableEffects.value = effects;
+		console.log(`🎇 [EFFECTS_STORE] Setting available effects: ${effects.length} effects`);
+		availableEffects.value = [...effects];
 	};
 
 	const setCurrentEffect = (effect: EffectState | null) => {
-		currentEffect.value = effect;
+		console.log(`🎇 [EFFECTS_STORE] Setting current effect:`, {
+			from: currentEffect.value,
+			to: effect,
+		});
+		currentEffect.value = effect ? { ...effect } : null;
 	};
 
 	const setEffectInfo = (info: EffectInfo | null) => {
-		effectInfo.value = info;
+		console.log(`ℹ️ [EFFECTS_STORE] Setting effect info:`, info);
+		effectInfo.value = info ? { ...info } : null;
 	};
 
 	const setLoading = (isLoading: boolean) => {
+		console.log(`⏳ [EFFECTS_STORE] Loading: ${loading.value} → ${isLoading}`);
 		loading.value = isLoading;
 	};
 
-	const updateTransition = (progress: number) => {
-		if (currentEffect.value) {
-			currentEffect.value.transition_progress = progress;
-			currentEffect.value.transitioning = progress < 1;
-		}
-	};
-
 	const startTransition = (effectId: number, effectName: string) => {
-		currentEffect.value = {
+		console.log(`🔄 [EFFECTS_STORE] Starting transition: ${effectName} (ID: ${effectId})`);
+		setCurrentEffect({
 			id: effectId,
 			name: effectName,
 			transitioning: true,
 			transition_progress: 0,
-		};
+		});
 	};
 
 	const completeTransition = () => {
 		if (currentEffect.value) {
-			currentEffect.value.transitioning = false;
-			currentEffect.value.transition_progress = 1;
+			console.log(`✅ [EFFECTS_STORE] Completing transition for: ${currentEffect.value.name}`);
+			const updated = {
+				...currentEffect.value,
+				transitioning: false,
+				transition_progress: 1,
+			};
+			setCurrentEffect(updated);
 		}
 	};
 
-	const reset = () => {
+	const validateEffectId = (id: number): boolean => {
+		const isValid = availableEffects.value.some((effect) => effect.id === id);
+		console.log(`🔍 [EFFECTS_STORE] Validating effect ID ${id}: ${isValid}`);
+		return isValid;
+	};
+
+	// Force trigger reactivity
+	const forceUpdate = () => {
+		if (currentEffect.value) {
+			const current = { ...currentEffect.value };
+			currentEffect.value = { ...current };
+		}
+	};
+
+	// Ensure default state
+	const ensureDefaultEffect = () => {
+		if (!currentEffect.value) {
+			console.log(`🎇 [EFFECTS_STORE] No current effect, setting default SpectrumBars`);
+			setCurrentEffect({
+				id: 0,
+				name: 'SpectrumBars',
+				transitioning: false,
+				transition_progress: 1,
+			});
+		}
+	};
+
+	// Pinia $reset method
+	const $reset = () => {
+		console.log('🔄 [EFFECTS_STORE] Resetting store');
+		availableEffects.value = [...EFFECTS];
 		currentEffect.value = null;
 		effectInfo.value = null;
 		loading.value = false;
-		availableEffects.value = [...EFFECTS];
 	};
 
 	return {
 		// State
-		availableEffects: readonly(availableEffects),
-		currentEffect: readonly(currentEffect),
-		effectInfo: readonly(effectInfo),
-		loading: readonly(loading),
+		availableEffects,
+		currentEffect,
+		effectInfo,
+		loading,
 
 		// Getters
 		currentEffectName,
 		isTransitioning,
 		transitionProgress,
-		effectsByCategory,
 		getEffectById,
+		getEffectByName,
 
 		// Actions
 		setAvailableEffects,
 		setCurrentEffect,
 		setEffectInfo,
 		setLoading,
-		updateTransition,
 		startTransition,
 		completeTransition,
-		reset,
+		validateEffectId,
+		forceUpdate,
+		ensureDefaultEffect,
+		$reset,
 	};
 });

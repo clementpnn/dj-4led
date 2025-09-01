@@ -1,6 +1,7 @@
 import { createPinia } from 'pinia';
 import { createApp } from 'vue';
-import App from './App.vue';
+
+import App from '@/App.vue';
 
 // Créer l'instance Pinia AVANT l'application
 const pinia = createPinia();

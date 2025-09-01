@@ -4,8 +4,8 @@
 			<button
 				v-for="tab in tabs"
 				:key="tab.id"
-				@click="$emit('tab-change', tab.id)"
 				:class="['nav-tab', { active: activeTab === tab.id }]"
+				@click="$emit('tab-change', tab.id)"
 			>
 				<span class="tab-label">{{ tab.label }}</span>
 			</button>

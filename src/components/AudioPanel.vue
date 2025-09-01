@@ -2,38 +2,38 @@
 	<div class="audio-panel">
 		<div class="panel-header">
 			<h2>Audio Spectrum</h2>
-			<div class="status-indicator" :class="{ active: audio.isHealthy, error: audio.state.error }">
-				{{ audio.state.error ? '❌' : audio.isHealthy ? '🟢' : '⚪' }}
+			<div class="status-indicator" :class="{ active: audioStore.isHealthy, error: audioStore.state.error }">
+				{{ audioStore.state.error ? '❌' : audioStore.isHealthy ? '🟢' : '⚪' }}
 			</div>
 		</div>
 
 		<!-- Controls -->
 		<div class="controls-section">
 			<div class="control-group">
-				<label class="control-label">Device ({{ audio.state.devices.length }} found)</label>
+				<label class="control-label">Device ({{ audioStore.state.devices.length }} found)</label>
 				<select
 					class="device-select"
-					:value="audio.selectedDeviceIndex ?? -1"
-					:disabled="audio.loading || audio.state.isCapturing"
+					:value="audioStore.selectedDeviceIndex ?? -1"
+					:disabled="audioStore.loading || audioStore.state.isCapturing"
 					@change="handleDeviceChange"
 				>
 					<option value="-1">Auto-detect</option>
-					<option v-for="(device, index) in audio.state.devices" :key="index" :value="index">
+					<option v-for="(device, index) in audioStore.state.devices" :key="index" :value="index">
 						{{ device }}
 					</option>
 				</select>
 			</div>
 
 			<div class="control-group">
-				<label class="control-label">Gain {{ audio.state.currentGain.toFixed(1) }}x</label>
+				<label class="control-label">Gain {{ audioStore.state.currentGain.toFixed(1) }}x</label>
 				<input
 					type="range"
 					class="gain-slider"
-					:value="audio.state.currentGain"
+					:value="audioStore.state.currentGain"
 					min="0.1"
 					max="3.0"
 					step="0.1"
-					:disabled="audio.loading"
+					:disabled="audioStore.loading"
 					@input="handleGainChange"
 				/>
 			</div>
@@ -41,19 +41,19 @@
 			<div class="button-group">
 				<button
 					class="control-btn"
-					:class="{ active: audio.state.isCapturing, loading: audio.loading }"
-					:disabled="audio.loading"
+					:class="{ active: audioStore.state.isCapturing, loading: audioStore.loading }"
+					:disabled="audioStore.loading"
 					@click="handleCaptureToggle"
 				>
-					<span v-if="audio.loading">●●●</span>
-					<span v-else>{{ audio.state.isCapturing ? 'Stop' : 'Start' }}</span>
+					<span v-if="audioStore.loading">●●●</span>
+					<span v-else>{{ audioStore.state.isCapturing ? 'Stop' : 'Start' }}</span>
 				</button>
 
 				<button
 					class="control-btn secondary"
-					:disabled="audio.loading"
-					@click="handleRefreshDevices"
+					:disabled="audioStore.loading"
 					title="Refresh audio devices"
+					@click="handleRefreshDevices"
 				>
 					🔄
 				</button>
@@ -61,7 +61,7 @@
 		</div>
 
 		<!-- Spectrum Display -->
-		<div class="spectrum-container" :class="{ active: audio.state.isCapturing }">
+		<div class="spectrum-container" :class="{ active: audioStore.state.isCapturing }">
 			<div class="spectrum-bars">
 				<div
 					v-for="(value, index) in processedSpectrum"
@@ -70,9 +70,9 @@
 					:style="getSpectrumBarStyle(value, index)"
 				></div>
 			</div>
-			<div v-if="!audio.state.isCapturing" class="spectrum-overlay">
+			<div v-if="!audioStore.state.isCapturing" class="spectrum-overlay">
 				<span>{{
-					audio.state.devices.length === 0
+					audioStore.state.devices.length === 0
 						? 'No audio devices found - try refreshing'
 						: 'Click Start to begin audio capture'
 				}}</span>
@@ -84,19 +84,22 @@
 			<div class="metric">
 				<span class="metric-label">RMS</span>
 				<div class="metric-bar">
-					<div class="metric-fill" :style="{ width: `${Math.min(100, audio.spectrumRMS * 100)}%` }"></div>
+					<div
+						class="metric-fill"
+						:style="{ width: `${Math.min(100, audioStore.spectrumRMS * 100)}%` }"
+					></div>
 				</div>
-				<span class="metric-value">{{ (audio.spectrumRMS * 100).toFixed(0) }}%</span>
+				<span class="metric-value">{{ (audioStore.spectrumRMS * 100).toFixed(0) }}%</span>
 			</div>
 			<div class="metric">
 				<span class="metric-label">PEAK</span>
 				<div class="metric-bar">
 					<div
 						class="metric-fill peak"
-						:style="{ width: `${Math.min(100, audio.spectrumPeak * 100)}%` }"
+						:style="{ width: `${Math.min(100, audioStore.spectrumPeak * 100)}%` }"
 					></div>
 				</div>
-				<span class="metric-value">{{ (audio.spectrumPeak * 100).toFixed(0) }}%</span>
+				<span class="metric-value">{{ (audioStore.spectrumPeak * 100).toFixed(0) }}%</span>
 			</div>
 			<div class="metric">
 				<span class="metric-label">SIGNAL</span>
@@ -108,36 +111,39 @@
 		</div>
 
 		<!-- Error Display -->
-		<div v-if="audio.state.error" class="error-message">
+		<div v-if="audioStore.state.error" class="error-message">
 			<span class="error-icon">⚠️</span>
-			{{ audio.state.error }}
-			<button @click="handleClearError" class="error-close">×</button>
+			{{ audioStore.state.error }}
+			<button class="error-close" @click="handleClearError">×</button>
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
 	import { computed } from 'vue';
-	import { useAudio } from '../composables/useAudio';
-	import { useLogs } from '../composables/useLogs';
 
-	// Composables
-	const audio = useAudio();
-	const logs = useLogs();
+	import { useAudio } from '@/composables/useAudio';
+	import { useAudioStore } from '@/stores/audio';
+
+	// Store - pour récupérer les données
+	const audioStore = useAudioStore();
+
+	// Composable - pour la logique et les actions uniquement
+	const { startCapture, stopCapture, setGain, getDevices, clearError } = useAudio();
 
 	// ===== COMPUTED =====
 
 	const processedSpectrum = computed(() => {
 		// Toujours retourner un spectre vide si pas en capture
-		if (!audio.state.isCapturing || !audio.state.spectrum || audio.state.spectrum.length === 0) {
+		if (!audioStore.state.isCapturing || !audioStore.state.spectrum || audioStore.state.spectrum.length === 0) {
 			return Array(64).fill(0);
 		}
 
 		// Le backend envoie déjà un spectrum traité avec FFT et normalisé
 		// On applique juste le gain et on s'assure d'avoir 64 valeurs
-		const normalized = audio.state.spectrum.map((value) => {
+		const normalized = audioStore.state.spectrum.map((value) => {
 			// Appliquer le gain avec limitation
-			const gainedValue = value * audio.state.currentGain;
+			const gainedValue = value * audioStore.state.currentGain;
 			// Limiter à [0, 1] avec une courbe légèrement compressée
 			return Math.max(0, Math.min(1, gainedValue * 0.8));
 		});
@@ -176,14 +182,14 @@
 
 		try {
 			if (deviceIndex >= 0) {
-				audio.setSelectedDevice(deviceIndex);
-				logs.logInfo(`Audio device selected: ${audio.state.devices[deviceIndex]}`, 'audio');
+				audioStore.setSelectedDevice(deviceIndex);
+				console.log(`Audio device selected: ${audioStore.state.devices[deviceIndex]}`);
 			} else {
-				audio.setSelectedDevice(null);
-				logs.logInfo('Audio device set to auto-detect', 'audio');
+				audioStore.setSelectedDevice(null);
+				console.log('Audio device set to auto-detect');
 			}
 		} catch (error) {
-			logs.logError(`Device selection error: ${error}`, 'audio');
+			console.error(`Device selection error: ${error}`);
 		}
 	};
 
@@ -193,35 +199,35 @@
 
 		const newGain = Number(target.value);
 		try {
-			const result = await audio.setGain(newGain);
+			const result = await setGain(newGain);
 			if (!result.success) {
-				logs.logError(`Failed to set gain: ${result.message}`, 'audio');
+				console.error(`Failed to set gain: ${result.message}`);
 			}
 		} catch (error) {
-			logs.logError(`Gain change error: ${error}`, 'audio');
+			console.error(`Gain change error: ${error}`);
 		}
 	};
 
 	const handleCaptureToggle = async (): Promise<void> => {
 		try {
-			const result = audio.state.isCapturing ? await audio.stopCapture() : await audio.startCapture();
-			logs.logAction('Audio capture toggle', result, 'audio');
+			const result = audioStore.state.isCapturing ? await stopCapture() : await startCapture();
+			console.log('Audio capture toggle result:', result);
 		} catch (error) {
-			logs.logError(`Audio capture error: ${error}`, 'audio');
+			console.error(`Audio capture error: ${error}`);
 		}
 	};
 
 	const handleRefreshDevices = async (): Promise<void> => {
 		try {
-			const result = await audio.getDevices();
-			logs.logAction('Audio devices refresh', result, 'audio');
+			const result = await getDevices();
+			console.log('Audio devices refresh result:', result);
 		} catch (error) {
-			logs.logError(`Device refresh error: ${error}`, 'audio');
+			console.error(`Device refresh error: ${error}`);
 		}
 	};
 
 	const handleClearError = (): void => {
-		audio.clearError();
+		clearError();
 	};
 
 	// ===== UTILITIES =====
@@ -367,20 +373,6 @@
 		cursor: not-allowed;
 	}
 
-	.device-info {
-		padding: 0.5rem 0.75rem;
-		background: #161b22;
-		border: 1px solid #21262d;
-		border-radius: 4px;
-		min-width: 200px;
-	}
-
-	.device-name {
-		font-size: 0.875rem;
-		color: #58a6ff;
-		font-weight: 500;
-	}
-
 	.gain-slider {
 		width: 100%;
 		height: 4px;
@@ -512,11 +504,6 @@
 		pointer-events: none;
 	}
 
-	.spectrum-overlay.warning {
-		color: #fd7e14;
-		font-weight: 500;
-	}
-
 	.metrics-section {
 		display: flex;
 		gap: 1rem;
@@ -569,10 +556,6 @@
 		font-family: 'Courier New', monospace;
 	}
 
-	.stats-section {
-		display: none; /* Supprimé */
-	}
-
 	.error-message {
 		display: flex;
 		align-items: center;
@@ -618,17 +601,6 @@
 		.metrics-section {
 			flex-direction: column;
 			gap: 0.75rem;
-		}
-
-		.stats-section {
-			flex-direction: column;
-			gap: 0.5rem;
-		}
-
-		.stat-item {
-			flex-direction: row;
-			justify-content: space-between;
-			text-align: left;
 		}
 	}
 </style>

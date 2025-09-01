@@ -3,8 +3,8 @@
 		<!-- Header -->
 		<div class="panel-header">
 			<h2>System Status</h2>
-			<div class="health-indicator" :class="system.health.status">
-				{{ formatHealthStatus(system.health.status) }}
+			<div class="health-indicator" :class="systemStore.health.status">
+				{{ formatHealthStatus(systemStore.health.status) }}
 			</div>
 		</div>
 
@@ -21,22 +21,22 @@
 			</div>
 
 			<!-- Audio -->
-			<div class="status-card" :class="{ active: system.stats?.audio.is_capturing }">
+			<div class="status-card" :class="{ active: audioStore.state.isCapturing }">
 				<div class="status-icon">🎧</div>
 				<div class="status-content">
 					<div class="status-label">Audio Capture</div>
-					<div class="status-value">{{ system.stats?.audio.is_capturing ? 'ACTIVE' : 'INACTIVE' }}</div>
-					<div class="status-detail">Gain: {{ (system.stats?.audio.gain || 1).toFixed(1) }}x</div>
+					<div class="status-value">{{ audioStore.state.isCapturing ? 'ACTIVE' : 'INACTIVE' }}</div>
+					<div class="status-detail">Gain: {{ (audioStore.state.currentGain || 1).toFixed(1) }}x</div>
 				</div>
 			</div>
 
 			<!-- LED -->
-			<div class="status-card" :class="{ active: system.stats?.led.is_running }">
+			<div class="status-card" :class="{ active: ledStore.isRunning }">
 				<div class="status-icon">💡</div>
 				<div class="status-content">
 					<div class="status-label">LED Output</div>
-					<div class="status-value">{{ system.stats?.led.is_running ? 'RUNNING' : 'STOPPED' }}</div>
-					<div class="status-detail">{{ system.stats?.led.controllers || 0 }} controllers</div>
+					<div class="status-value">{{ ledStore.isRunning ? 'RUNNING' : 'STOPPED' }}</div>
+					<div class="status-detail">{{ ledStore.controllerCount || 0 }} controllers</div>
 				</div>
 			</div>
 
@@ -45,8 +45,8 @@
 				<div class="status-icon">⚡</div>
 				<div class="status-content">
 					<div class="status-label">Performance</div>
-					<div class="status-value">{{ system.stats?.performance.fps || 0 }} FPS</div>
-					<div class="status-detail">{{ system.systemUptime }} uptime</div>
+					<div class="status-value">{{ framesStore.stats.fps || 0 }} FPS</div>
+					<div class="status-detail">{{ systemStore.systemUptime }} uptime</div>
 				</div>
 			</div>
 		</div>
@@ -55,22 +55,22 @@
 		<div class="health-section">
 			<div class="health-score">
 				<span class="score-label">Health Score</span>
-				<span class="score-value" :class="system.health.status">{{ system.health.score }}/100</span>
+				<span class="score-value" :class="systemStore.health.status">{{ systemStore.health.score }}/100</span>
 			</div>
 			<div class="score-bar">
 				<div
 					class="score-fill"
-					:class="system.health.status"
-					:style="{ width: `${system.health.score}%` }"
+					:class="systemStore.health.status"
+					:style="{ width: `${systemStore.health.score}%` }"
 				></div>
 			</div>
 		</div>
 
 		<!-- Issues -->
-		<div v-if="system.health.issues.length > 0" class="issues-section">
-			<div class="issues-header">Issues ({{ system.health.issues.length }})</div>
+		<div v-if="systemStore.health.issues.length > 0" class="issues-section">
+			<div class="issues-header">Issues ({{ systemStore.health.issues.length }})</div>
 			<div class="issues-list">
-				<div v-for="(issue, index) in system.health.issues" :key="index" class="issue-item">
+				<div v-for="(issue, index) in systemStore.health.issues" :key="index" class="issue-item">
 					{{ issue }}
 				</div>
 			</div>
@@ -78,13 +78,13 @@
 
 		<!-- Actions -->
 		<div class="controls-section">
-			<button class="control-btn primary" :disabled="system.loading" @click="handleHealthCheck">
-				{{ system.loading ? 'Checking...' : 'Health Check' }}
+			<button class="control-btn primary" :disabled="systemStore.loading" @click="handleHealthCheck">
+				{{ systemStore.loading ? 'Checking...' : 'Health Check' }}
 			</button>
-			<button class="control-btn secondary" :disabled="system.loading" @click="handleRefreshStats">
+			<button class="control-btn secondary" :disabled="systemStore.loading" @click="handleRefreshStats">
 				Refresh
 			</button>
-			<button class="control-btn secondary" :disabled="system.loading" @click="handleRunDiagnostics">
+			<button class="control-btn secondary" :disabled="systemStore.loading" @click="handleRunDiagnostics">
 				Diagnostics
 			</button>
 		</div>
@@ -93,7 +93,12 @@
 
 <script setup lang="ts">
 	import { computed } from 'vue';
-	import { useSystem } from '../composables/useSystem';
+
+	import { useSystem } from '@/composables/useSystem';
+	import { useAudioStore } from '@/stores/audio';
+	import { useFramesStore } from '@/stores/frames';
+	import { useLEDStore } from '@/stores/led';
+	import { useSystemStore } from '@/stores/system';
 
 	// Props pour les données de connexion qui peuvent venir d'ailleurs
 	interface Props {
@@ -106,10 +111,16 @@
 		isOnline: true,
 	});
 
-	// Composable System
-	const system = useSystem();
+	// Stores - pour récupérer les données
+	const systemStore = useSystemStore();
+	const audioStore = useAudioStore();
+	const ledStore = useLEDStore();
+	const framesStore = useFramesStore();
 
-	// Computed properties
+	// Composables - pour la logique et les actions uniquement
+	const { getStatus, runFullDiagnostics } = useSystem();
+
+	// Computed properties basées sur les stores
 	const connectionClass = computed(() => {
 		if (!props.isOnline) return 'critical';
 		if (props.connectionQuality >= 80) return 'healthy';
@@ -125,11 +136,11 @@
 		return `${props.connectionQuality}% quality`;
 	});
 
-	// Handlers
+	// Handlers - utilisant les composables pour les actions
 	const handleHealthCheck = async (): Promise<void> => {
 		try {
-			await system.getStatus();
-			system.updateHealth();
+			await getStatus();
+			systemStore.updateHealth();
 		} catch (error) {
 			console.error('Failed to run health check:', error);
 		}
@@ -137,7 +148,7 @@
 
 	const handleRefreshStats = async (): Promise<void> => {
 		try {
-			await system.getStatus();
+			await getStatus();
 		} catch (error) {
 			console.error('Failed to refresh stats:', error);
 		}
@@ -145,7 +156,7 @@
 
 	const handleRunDiagnostics = async (): Promise<void> => {
 		try {
-			await system.runFullDiagnostics();
+			await runFullDiagnostics();
 		} catch (error) {
 			console.error('Failed to run diagnostics:', error);
 		}

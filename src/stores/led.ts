@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
 import { computed, readonly, ref } from 'vue';
-import { DEFAULT_LED_CONFIG } from '../config';
-import type { LEDController, LEDStats } from '../types';
+
+import { DEFAULT_LED_CONFIG } from '@/config';
+import type { LEDController, LEDStats } from '@/types';
 
 export const useLEDStore = defineStore('led', () => {
 	// ===== STATE =====
